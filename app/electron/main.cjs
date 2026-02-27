@@ -1,6 +1,10 @@
 const path = require("node:path");
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require("electron");
 const { dm, serializeError } = require("./backend.cjs");
+const { checkForUpdate } = require("./update-check.cjs");
+
+const UPDATE_REPO_OWNER = "gJoonhyuk";
+const UPDATE_REPO_NAME = "Liquibase-Data-Manager";
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -36,6 +40,41 @@ function handle(channel, fn) {
   });
 }
 
+async function notifyIfUpdateAvailable() {
+  const currentVersion = app.getVersion();
+  const result = await checkForUpdate({
+    currentVersion,
+    owner: UPDATE_REPO_OWNER,
+    repo: UPDATE_REPO_NAME,
+    timeoutMs: 5000
+  });
+
+  if (result.status !== "update-available") {
+    if (result.status === "skip") {
+      console.warn("[update-check]", result.reason || "Skipped");
+    }
+    return;
+  }
+
+  const latestVersion = String(result.latestVersion || "").replace(/^[vV]/, "");
+  const currentDisplay = String(currentVersion || "").replace(/^[vV]/, "");
+  const releaseUrl = String(result.releaseUrl || "").trim();
+  const response = await dialog.showMessageBox({
+    type: "info",
+    title: "새 버전이 있습니다",
+    message: `현재 버전 ${currentDisplay}, 최신 버전 ${latestVersion}`,
+    detail: "업데이트를 다운로드하려면 GitHub Releases 페이지를 여세요.",
+    buttons: ["나중에", "릴리즈 페이지 열기"],
+    defaultId: 1,
+    cancelId: 0,
+    noLink: true
+  });
+
+  if (response.response === 1 && releaseUrl) {
+    await shell.openExternal(releaseUrl);
+  }
+}
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   handle("dm:workspace:open", (p) => dm.openWorkspace(p || {}));
@@ -67,6 +106,9 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+  notifyIfUpdateAvailable().catch((error) => {
+    console.warn("[update-check]", error?.message || error);
+  });
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
