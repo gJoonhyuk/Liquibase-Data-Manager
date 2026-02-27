@@ -1,0 +1,16 @@
+# frontend
+/app/node_modules/
+/app/dist/
+/app/release/
+
+# tools
+/tools/**/node_modules/
+
+# electron-builder outputs
+/app/release/*.exe
+/app/release/*.blockmap
+/app/release/win-unpacked/
+/app/release/builder-debug.yml
+
+# logs
+*.log

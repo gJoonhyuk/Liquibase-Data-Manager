@@ -1,0 +1,19 @@
+{
+  "name": "data-csv-exporter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Export DB table data to CSV files",
+  "bin": {
+    "data-csv-exporter": "./src/cli.mjs"
+  },
+  "scripts": {
+    "export": "node ./src/cli.mjs"
+  },
+  "dependencies": {
+    "csv-stringify": "^6.5.2",
+    "mysql2": "^3.12.0",
+    "oracledb": "^6.7.0",
+    "pg": "^8.13.1"
+  }
+}
