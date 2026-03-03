@@ -406,8 +406,65 @@ function readSchemaFromChangelogDir(changelogDir) {
   return merged;
 }
 
+function resolveDefaultMasterChangelogPath(workspacePath) {
+  const root = path.resolve(workspacePath);
+  const candidates = [];
+  const skipDirs = new Set([".git", "node_modules", "dist", "build", "out", ".next"]);
+
+  const walk = (dir) => {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const name = entry.name;
+      const p = path.join(dir, name);
+      if (entry.isDirectory()) {
+        if (skipDirs.has(name)) continue;
+        walk(p);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!/\.ya?ml$/i.test(name)) continue;
+      const lower = name.toLowerCase();
+      if (!lower.includes("master")) continue;
+      candidates.push(p);
+    }
+  };
+
+  walk(root);
+  if (!candidates.length) return null;
+
+  const rank = (p) => {
+    const n = path.basename(p).toLowerCase();
+    if (n === "generated-master.yaml" || n === "generated-master.yml") return 0;
+    if (n === "db.changelog-master.yaml" || n === "db.changelog-master.yml") return 1;
+    if (n.includes("generated")) return 2;
+    return 3;
+  };
+
+  candidates.sort((a, b) => {
+    const ra = rank(a);
+    const rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    return a.localeCompare(b);
+  });
+  return candidates[0];
+}
+
 function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
-  const masterPath = path.resolve(masterChangelogPath);
+  const requestedPath = path.resolve(masterChangelogPath);
+  const requestedDir = path.dirname(requestedPath);
+  const requestedBase = path.basename(requestedPath).toLowerCase();
+  const requestedDirBase = path.basename(requestedDir).toLowerCase();
+
+  // If user selected a table fragment (for example: .../tables/FOO.yaml),
+  // normalize output to its parent changelog dir and write master as generated-master.yaml.
+  const looksLikeMaster = /master/.test(requestedBase);
+  const baseDir = requestedDirBase === "tables" ? path.dirname(requestedDir) : requestedDir;
+  const masterPath = looksLikeMaster ? requestedPath : path.join(baseDir, "generated-master.yaml");
   const dir = path.dirname(masterPath);
   fs.mkdirSync(dir, { recursive: true });
   const tablesDir = path.join(dir, "tables");
@@ -818,9 +875,9 @@ const dm = {
           if (path.isAbsolute(input)) return path.resolve(input);
           return path.resolve(workspacePath, input);
         }
-        const generatedMaster = path.resolve(workspacePath, "db", "changelog", "generated", "generated-master.yaml");
-        if (fs.existsSync(generatedMaster)) return generatedMaster;
-        return path.resolve(workspacePath, "db", "changelog", "db.changelog-master.yaml");
+        const auto = resolveDefaultMasterChangelogPath(workspacePath);
+        if (auto) return auto;
+        throw new AppError("Changelog path is empty and no master YAML was found in workspace.");
       })();
       advanceFixedStep("체인지로그 경로 결정", 1, 1, path.relative(workspacePath, effectiveChangelog) || "resolved");
       await yieldToEventLoop();
@@ -831,7 +888,7 @@ const dm = {
       await yieldToEventLoop();
       let schemas = readSchema(effectiveChangelog);
       if (!schemas.size) {
-        advanceFixedStep("스키마 로딩", 0, 1, "fallback scan db/changelog");
+        advanceFixedStep("스키마 로딩", 0, 1, "fallback scan changelog dir");
         await yieldToEventLoop();
         const changelogDir = path.dirname(effectiveChangelog);
         schemas = readSchemaFromChangelogDir(changelogDir);
