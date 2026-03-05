@@ -24,7 +24,7 @@ export function SqlConsolePanel({ sqlPanelHeight, selectedTable, onError, worksp
   const onClearQueryResult = () => setQueryRowsByTable((prev) => ({ ...prev, [tableKey]: [] }));
 
   return (
-    <Card className="min-h-0 border bg-background flex flex-col overflow-hidden" style={{ height: sqlPanelHeight }}>
+    <Card className="min-h-0 border bg-slate-100/45 dark:bg-slate-900/35 flex flex-col overflow-hidden" style={{ height: sqlPanelHeight }}>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between gap-2">
           <CardTitle>SQL Console</CardTitle>

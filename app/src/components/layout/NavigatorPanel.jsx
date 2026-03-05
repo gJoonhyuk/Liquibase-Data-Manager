@@ -22,7 +22,7 @@ export function NavigatorPanel({ tables, selectedTable, onSelectTable, onCreateT
 
   return (
     <>
-      <Card className="m-2 mr-1 flex h-full min-h-0 flex-col overflow-hidden">
+      <Card className="m-2 mr-1 flex h-full min-h-0 flex-col overflow-hidden bg-slate-100/50 dark:bg-slate-900/40">
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle>Table</CardTitle>

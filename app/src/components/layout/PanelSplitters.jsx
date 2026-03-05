@@ -4,7 +4,7 @@ import { Button } from "../ui/button";
 export function HorizontalSplitter({ collapsed, onResizeStart, onToggle }) {
   return (
     <div
-      className={`relative my-1 h-3 rounded border bg-muted/30 ${collapsed ? "cursor-default" : "cursor-row-resize"}`}
+      className={`relative my-1 h-3 rounded border border-slate-300/70 bg-slate-300/30 dark:border-slate-700/80 dark:bg-slate-700/30 ${collapsed ? "cursor-default" : "cursor-row-resize"}`}
       onMouseDown={() => {
         if (!collapsed) onResizeStart();
       }}
@@ -12,7 +12,7 @@ export function HorizontalSplitter({ collapsed, onResizeStart, onToggle }) {
       <Button
         size="icon"
         variant="outline"
-        className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full bg-background shadow-sm"
+        className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full bg-background/95 shadow-sm"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={onToggle}
       >
@@ -25,13 +25,13 @@ export function HorizontalSplitter({ collapsed, onResizeStart, onToggle }) {
 export function VerticalSplitter({ collapsed, onResizeStart, onToggle }) {
   return (
     <div
-      className={`relative min-h-0 h-full border-x bg-muted/30 ${collapsed ? "cursor-default" : "cursor-col-resize"}`}
+      className={`relative min-h-0 h-full border-x border-slate-300/70 bg-slate-300/30 dark:border-slate-700/80 dark:bg-slate-700/30 ${collapsed ? "cursor-default" : "cursor-col-resize"}`}
       onMouseDown={() => !collapsed && onResizeStart()}
     >
       <Button
         size="icon"
         variant="outline"
-        className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full bg-background shadow-sm"
+        className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full bg-background/95 shadow-sm"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation();
@@ -47,13 +47,13 @@ export function VerticalSplitter({ collapsed, onResizeStart, onToggle }) {
 export function LeftVerticalSplitter({ collapsed, onResizeStart, onToggle }) {
   return (
     <div
-      className={`relative min-h-0 h-full border-x bg-muted/30 ${collapsed ? "cursor-default" : "cursor-col-resize"}`}
+      className={`relative min-h-0 h-full border-x border-slate-300/70 bg-slate-300/30 dark:border-slate-700/80 dark:bg-slate-700/30 ${collapsed ? "cursor-default" : "cursor-col-resize"}`}
       onMouseDown={() => !collapsed && onResizeStart()}
     >
       <Button
         size="icon"
         variant="outline"
-        className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full bg-background shadow-sm"
+        className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full bg-background/95 shadow-sm"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation();

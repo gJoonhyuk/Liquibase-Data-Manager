@@ -1,3 +1,5 @@
+@import url("https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -25,7 +27,7 @@ body.dm-resizing {
 /* Global translucent in-place scrollbar */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
+  scrollbar-color: rgba(71, 85, 105, 0.52) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -38,56 +40,56 @@ body.dm-resizing {
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: rgba(100, 116, 139, 0.42);
+  background-color: rgba(71, 85, 105, 0.48);
   border-radius: 9999px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(100, 116, 139, 0.62);
+  background-color: rgba(51, 65, 85, 0.68);
 }
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --background: 190 42% 96%;
+    --foreground: 210 38% 14%;
+    --card: 190 36% 98%;
+    --card-foreground: 210 38% 14%;
+    --primary: 186 86% 39%;
+    --primary-foreground: 190 40% 98%;
+    --secondary: 189 28% 91%;
+    --secondary-foreground: 208 34% 20%;
+    --muted: 191 26% 89%;
+    --muted-foreground: 208 18% 39%;
+    --accent: 186 35% 86%;
+    --accent-foreground: 208 34% 20%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
+    --border: 190 21% 79%;
+    --input: 190 23% 83%;
+    --ring: 186 86% 39%;
     --radius: 0.5rem;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
+    --background: 197 35% 10%;
+    --foreground: 192 34% 93%;
+    --card: 196 31% 13%;
+    --card-foreground: 192 34% 93%;
+    --primary: 184 84% 58%;
+    --primary-foreground: 199 40% 12%;
+    --secondary: 197 23% 20%;
+    --secondary-foreground: 192 34% 93%;
+    --muted: 198 21% 18%;
+    --muted-foreground: 194 18% 72%;
+    --accent: 196 24% 23%;
+    --accent-foreground: 190 40% 98%;
+    --destructive: 0 72% 44%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
+    --border: 196 20% 29%;
+    --input: 196 20% 26%;
+    --ring: 184 84% 58%;
   }
 
   * {
@@ -96,5 +98,14 @@ body.dm-resizing {
 
   body {
     @apply bg-background text-foreground;
+    font-family: "Pretendard", "Pretendard Variable", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-image:
+      radial-gradient(1200px 400px at 8% -10%, hsl(186 82% 70% / 0.2), transparent 60%),
+      radial-gradient(900px 360px at 92% -20%, hsl(173 64% 62% / 0.16), transparent 60%);
   }
 }

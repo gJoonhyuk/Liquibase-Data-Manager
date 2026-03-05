@@ -79,7 +79,7 @@ export function StructureEditorPanel({
   };
 
   return (
-    <Card className="m-2 ml-1 h-full min-h-0 min-w-0 overflow-hidden flex flex-col">
+    <Card className="m-2 ml-1 h-full min-h-0 min-w-0 overflow-hidden flex flex-col bg-slate-100/45 dark:bg-slate-900/35">
       <CardHeader className="pb-2">
         <CardTitle>Info</CardTitle>
       </CardHeader>
@@ -87,7 +87,7 @@ export function StructureEditorPanel({
         <div className="min-h-0 flex-1 w-full overflow-y-auto overflow-x-hidden p-4 pr-2 pb-3">
           {schemaDraft ? (
             <div className="space-y-4 w-full min-w-0">
-              <Card className="bg-muted/20 w-full min-w-0 overflow-hidden">
+              <Card className="bg-slate-200/45 dark:bg-slate-800/35 w-full min-w-0 overflow-hidden">
                 <CardHeader className="pb-2">
                   <CardTitle>Columns</CardTitle>
                 </CardHeader>
@@ -334,7 +334,7 @@ export function StructureEditorPanel({
 
               <Separator />
 
-              <Card className="bg-muted/10 w-full min-w-0">
+              <Card className="bg-slate-200/35 dark:bg-slate-800/30 w-full min-w-0">
                 <CardHeader className="pb-2">
                   <CardTitle>Primary Key</CardTitle>
                 </CardHeader>
@@ -354,7 +354,7 @@ export function StructureEditorPanel({
 
               <Separator />
 
-              <Card className="bg-muted/10 w-full min-w-0">
+              <Card className="bg-slate-200/35 dark:bg-slate-800/30 w-full min-w-0">
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
                     <CardTitle>Indexes</CardTitle>
@@ -398,7 +398,7 @@ export function StructureEditorPanel({
 
               <Separator />
 
-              <Card className="bg-muted/10 w-full min-w-0">
+              <Card className="bg-slate-200/35 dark:bg-slate-800/30 w-full min-w-0">
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
                     <CardTitle>Foreign Keys</CardTitle>

@@ -347,8 +347,8 @@ export default function App() {
           onOpenErrorLog={() => workspace.setErrorDialogOpen(true)}
         />
 
-        <div className="border-b px-2 py-2">
-          <div className="flex w-full items-center gap-3 rounded-xl border bg-muted/30 p-1.5">
+        <div className="border-b bg-slate-200/30 dark:bg-slate-800/25 px-2 py-2">
+          <div className="flex w-full items-center gap-3 rounded-xl border bg-gradient-to-r from-slate-200/70 to-blue-200/45 p-1.5 dark:from-slate-800/80 dark:to-blue-900/45">
             <div className="grid w-full max-w-[980px] grid-cols-4 gap-1">
               {[
                 { id: "tables", label: "테이블", icon: Database },
@@ -365,8 +365,8 @@ export default function App() {
                     onClick={() => setActiveTab(t.id)}
                     className={`inline-flex h-10 items-center justify-center gap-2 rounded-lg border text-sm transition ${
                       active
-                        ? "border-primary/25 bg-background text-foreground shadow-sm"
-                        : "border-transparent text-muted-foreground hover:border-border hover:bg-background/70 hover:text-foreground"
+                        ? "border-primary/35 bg-background/95 text-foreground shadow-sm"
+                        : "border-transparent text-muted-foreground hover:border-border hover:bg-background/80 hover:text-foreground"
                     }`}
                   >
                     <Icon className="h-4 w-4" />
@@ -379,7 +379,7 @@ export default function App() {
         </div>
 
         {!workspace.workspaceOpened ? (
-          <div className="m-2 grid min-h-0 flex-1 place-items-center rounded-xl border border-dashed bg-muted/20">
+          <div className="m-2 grid min-h-0 flex-1 place-items-center rounded-xl border border-dashed border-slate-400/60 bg-slate-200/35 dark:border-slate-700/70 dark:bg-slate-800/25">
             <p className="text-sm text-muted-foreground">워크스페이스를 열면 선택한 탭의 편집 화면이 활성화됩니다.</p>
           </div>
         ) : activeTab === "tables" ? (

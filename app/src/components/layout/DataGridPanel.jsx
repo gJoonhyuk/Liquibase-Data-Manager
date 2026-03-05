@@ -288,7 +288,7 @@ export function DataGridPanel({
 
   return (
     <>
-      <Card className="min-h-0 flex flex-1 flex-col">
+      <Card className="min-h-0 flex flex-1 flex-col bg-slate-100/45 dark:bg-slate-900/35">
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between gap-2">
             <CardTitle>{selectedTable || "Data"}</CardTitle>
@@ -347,7 +347,7 @@ export function DataGridPanel({
           </div>
         </CardHeader>
         <CardContent className="min-h-0 flex flex-1 flex-col gap-2">
-          <div className="flex items-center gap-2 rounded-md border p-2">
+          <div className="flex items-center gap-2 rounded-md border bg-background/70 p-2">
             <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
             <Input
               className="h-9 w-[24%] min-w-[220px] text-sm"
@@ -356,7 +356,7 @@ export function DataGridPanel({
               placeholder="WHERE:"
               disabled={!workspaceReady}
             />
-            <div className="relative h-9 min-w-0 flex-1 overflow-hidden rounded-md border bg-muted/30 px-1">
+            <div className="relative h-9 min-w-0 flex-1 overflow-hidden rounded-md border bg-slate-200/55 dark:bg-slate-800/45 px-1">
               {grid.sortRules.length === 0 ? (
                 <div className="flex h-full items-center px-1 text-sm text-muted-foreground">ORDER:</div>
               ) : (
@@ -444,7 +444,7 @@ export function DataGridPanel({
           {grid.isLoadingRows && <p className="text-xs text-muted-foreground">데이터 로딩 중...</p>}
           {!grid.isLoadingRows && requiredMissingCount > 0 && <p className="text-xs text-red-500">필수값 누락 {requiredMissingCount}건 (현재 페이지)</p>}
           {!grid.isLoadingRows && typeInvalidCount > 0 && <p className="text-xs text-red-500">데이터 타입 오류 {typeInvalidCount}건 (현재 페이지)</p>}
-          <div ref={gridScrollRef} className="min-h-0 flex-1 overflow-auto rounded-md border">
+          <div ref={gridScrollRef} className="min-h-0 flex-1 overflow-auto rounded-md border bg-background/80">
             <table className="table-fixed text-sm" style={{ width: "100%", minWidth: tableCoreMinWidth }}>
               <colgroup>
                 <col style={{ width: 40, minWidth: 40 }} />
@@ -455,7 +455,7 @@ export function DataGridPanel({
                 <col />
                 <col style={{ width: 56, minWidth: 56 }} />
               </colgroup>
-              <thead className="sticky top-0 z-30 bg-muted/80">
+              <thead className="sticky top-0 z-30 bg-slate-200/80 dark:bg-slate-800/75">
                 <tr>
                   <th className="w-10 px-2 py-2 text-center align-middle">
                     <div className="flex items-center justify-center">
