@@ -17,6 +17,16 @@ import { Input } from "./components/ui/input";
 import { Textarea } from "./components/ui/textarea";
 
 const ROUTINE_DB_TYPES = ["Oracle", "MariaDB", "SqlServer", "PostgreSQL"];
+const ROUTINE_DB_DIR_BY_TYPE = {
+  Oracle: "oracle",
+  MariaDB: "mariadb",
+  SqlServer: "mssql",
+  PostgreSQL: "postgresql"
+};
+
+function getRoutineDbDir(dbType) {
+  return ROUTINE_DB_DIR_BY_TYPE[String(dbType || "").trim()] || "oracle";
+}
 
 export default function App() {
   const { theme, setTheme } = useTheme();
@@ -28,6 +38,8 @@ export default function App() {
   const [selectedSequence, setSelectedSequence] = useState("");
   const [selectedFunction, setSelectedFunction] = useState("");
   const [selectedProcedure, setSelectedProcedure] = useState("");
+  const [newFunctionNames, setNewFunctionNames] = useState([]);
+  const [newProcedureNames, setNewProcedureNames] = useState([]);
 
   const workspace = useWorkspaceState();
   const persistedTableNames = useMemo(() => (workspace.tables || []).map((t) => t.tableName), [workspace.tables]);
@@ -65,6 +77,12 @@ export default function App() {
     if (!procedureNames.length) setSelectedProcedure("");
     else if (!procedureNames.includes(selectedProcedure)) setSelectedProcedure(procedureNames[0]);
   }, [procedureNames, selectedProcedure]);
+  useEffect(() => {
+    if (workspace.openingWorkspace) {
+      setNewFunctionNames([]);
+      setNewProcedureNames([]);
+    }
+  }, [workspace.openingWorkspace]);
 
   const validateTableName = (rawName) => {
     const name = (rawName || "").trim();
@@ -164,6 +182,8 @@ export default function App() {
       setSaveProgress({ running: true, current: 3, total: 4, step: "메타 갱신", message: "refreshing view" });
       await workspace.refreshMeta(workspace.selectedTable);
       if (hasDataChanges && globalSaveBinding?.reloadCurrentTable) await globalSaveBinding.reloadCurrentTable();
+      setNewFunctionNames([]);
+      setNewProcedureNames([]);
       const migrated = result?.migrated ? " / legacy->latest migrated" : "";
       const chgPath = result?.path ? ` / changelog: ${result.path}` : "";
       workspace.setMessage(`전체 저장 완료${migrated}${chgPath}`);
@@ -198,12 +218,16 @@ export default function App() {
     while ((source || {})[`${base}_${i}`]) i += 1;
     const name = `${base}_${i}`;
     setter((prev) => ({ ...prev, [name]: { name, dbType: "Oracle", sql: "", rollbackSql: "" } }));
+    if (kind === "function") setNewFunctionNames((prev) => (prev.includes(name) ? prev : [...prev, name]));
+    else setNewProcedureNames((prev) => (prev.includes(name) ? prev : [...prev, name]));
     if (kind === "function") setSelectedFunction(name);
     else setSelectedProcedure(name);
   };
   const deleteRoutine = (kind, name) => {
     const setter = kind === "function" ? workspace.setFunctions : workspace.setProcedures;
     setter((prev) => Object.fromEntries(Object.entries(prev || {}).filter(([k]) => k !== name)));
+    if (kind === "function") setNewFunctionNames((prev) => prev.filter((v) => v !== name));
+    else setNewProcedureNames((prev) => prev.filter((v) => v !== name));
   };
   const updateRoutine = (kind, name, patch) => {
     const setter = kind === "function" ? workspace.setFunctions : workspace.setProcedures;
@@ -266,6 +290,13 @@ export default function App() {
     const selected = isFn ? selectedFunction : selectedProcedure;
     const map = isFn ? workspace.functions : workspace.procedures;
     const routine = (map || {})[selected];
+    const isNewRoutine = isFn ? newFunctionNames.includes(selected) : newProcedureNames.includes(selected);
+    const dbTypeLocked = !!selected && !isNewRoutine;
+    const routinePathOf = (name) => {
+      const target = (map || {})[name];
+      const dbDir = getRoutineDbDir(target?.dbType || "Oracle");
+      return `${isFn ? "functions" : "procedures"}/${dbDir}/${String(name || "").replace(/[\\/:*?\"<>|]/g, "_")}.yaml`;
+    };
     return (
       <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] gap-2 p-2">
         <Card className="min-h-0">
@@ -278,7 +309,12 @@ export default function App() {
           <CardContent className="space-y-2 overflow-auto">
             {names.map((name) => (
               <div key={name} className="flex items-center gap-2">
-                <Button className="w-full justify-start" variant={name === selected ? "default" : "secondary"} onClick={() => (isFn ? setSelectedFunction(name) : setSelectedProcedure(name))}>{name}</Button>
+                <Button className="h-auto w-full justify-start py-2" variant={name === selected ? "default" : "secondary"} onClick={() => (isFn ? setSelectedFunction(name) : setSelectedProcedure(name))}>
+                  <span className="flex min-w-0 flex-col items-start">
+                    <span className="truncate font-semibold">{name}</span>
+                    <span className="truncate text-[11px] font-normal opacity-80">{routinePathOf(name)}</span>
+                  </span>
+                </Button>
                 <Button size="icon" variant="ghost" onClick={() => deleteRoutine(kind, name)}><Trash2 className="h-4 w-4" /></Button>
               </div>
             ))}
@@ -300,6 +336,11 @@ export default function App() {
                     next[newName] = { ...old, ...routine, name: newName };
                     return next;
                   });
+                  if (isFn) {
+                    setNewFunctionNames((prev) => prev.map((v) => (v === selected ? newName : v)));
+                  } else {
+                    setNewProcedureNames((prev) => prev.map((v) => (v === selected ? newName : v)));
+                  }
                   if (isFn) setSelectedFunction(newName);
                   else setSelectedProcedure(newName);
                 }} placeholder="name" />
@@ -307,11 +348,15 @@ export default function App() {
                   className="h-9 rounded-md border bg-background px-2 text-sm"
                   value={routine.dbType || "Oracle"}
                   onChange={(e) => updateRoutine(kind, selected, { dbType: e.target.value })}
+                  disabled={dbTypeLocked}
                 >
                   {ROUTINE_DB_TYPES.map((dbType) => (
                     <option key={dbType} value={dbType}>{dbType}</option>
                   ))}
                 </select>
+                {dbTypeLocked && (
+                  <p className="text-xs text-muted-foreground">기존 객체는 DB 타입을 변경할 수 없습니다.</p>
+                )}
                 <Textarea className="min-h-[220px] font-mono" value={routine.sql || ""} onChange={(e) => updateRoutine(kind, selected, { sql: e.target.value })} placeholder="SQL body" />
                 <Textarea className="min-h-[140px] font-mono" value={routine.rollbackSql || ""} onChange={(e) => updateRoutine(kind, selected, { rollbackSql: e.target.value })} placeholder="Rollback SQL (optional)" />
               </>

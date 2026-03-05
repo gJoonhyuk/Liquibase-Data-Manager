@@ -57,6 +57,70 @@ function writeYaml(filePath, obj) {
   fs.writeFileSync(filePath, `${YAML.stringify(obj).trimEnd()}\n`, "utf8");
 }
 
+function decodeSqlStringLiteral(v) {
+  const s = String(v || "");
+  if (s.length >= 2 && s.startsWith("'") && s.endsWith("'")) {
+    return s.slice(1, -1).replace(/''/g, "'");
+  }
+  return s;
+}
+
+function stripOuterParens(v) {
+  let s = String(v || "").trim();
+  while (s.startsWith("(") && s.endsWith(")")) {
+    let depth = 0;
+    let balanced = true;
+    for (let i = 0; i < s.length; i += 1) {
+      const ch = s[i];
+      if (ch === "(") depth += 1;
+      if (ch === ")") depth -= 1;
+      if (depth === 0 && i < s.length - 1) {
+        balanced = false;
+        break;
+      }
+      if (depth < 0) {
+        balanced = false;
+        break;
+      }
+    }
+    if (!balanced || depth !== 0) break;
+    s = s.slice(1, -1).trim();
+  }
+  return s;
+}
+
+function stripPostgresCast(v) {
+  let s = String(v || "").trim();
+  while (true) {
+    const next = s.replace(/\s*::\s*[\w.\[\]"]+\s*$/u, "").trim();
+    if (next === s) break;
+    s = next;
+  }
+  return s;
+}
+
+function toLiquibaseDefaultField(defaultValue) {
+  const raw = String(defaultValue || "").trim();
+  if (!raw) return {};
+
+  const unwrapped = stripOuterParens(stripPostgresCast(raw));
+  if (!unwrapped) return {};
+  if (/^null$/i.test(unwrapped)) return {};
+  if (/^'(?:[^']|'')*'$/u.test(unwrapped)) {
+    return { defaultValue: decodeSqlStringLiteral(unwrapped) };
+  }
+  if (/^(true|false)$/i.test(unwrapped)) {
+    return { defaultValueBoolean: /^true$/i.test(unwrapped) };
+  }
+  if (/^[+-]?\d+(?:\.\d+)?$/.test(unwrapped)) {
+    return { defaultValueNumeric: Number(unwrapped) };
+  }
+  if (/[()]/.test(unwrapped) || /\b(current_|sysdate|systimestamp|now|nextval)\b/i.test(unwrapped)) {
+    return { defaultValueComputed: unwrapped };
+  }
+  return { defaultValue: unwrapped };
+}
+
 function oracleTypeLiteral(c) {
   const t = String(c.data_type || "").toUpperCase();
   const precision = c.data_precision == null ? "" : String(c.data_precision);
@@ -586,7 +650,7 @@ function tableToYaml(table, author) {
         column: {
           name: c.name,
           type: c.type,
-          ...(String(c.defaultValue || "").trim() ? { defaultValue: c.defaultValue } : {}),
+          ...toLiquibaseDefaultField(c.defaultValue),
           constraints: { nullable: !!c.nullable }
         }
       }))

@@ -136,6 +136,92 @@ function normalizeType(type) {
   return String(type || "").trim().toLowerCase();
 }
 
+function decodeSqlStringLiteral(v) {
+  const s = String(v || "");
+  if (s.length >= 2 && s.startsWith("'") && s.endsWith("'")) {
+    return s.slice(1, -1).replace(/''/g, "'");
+  }
+  return s;
+}
+
+function stripOuterParens(v) {
+  let s = String(v || "").trim();
+  while (s.startsWith("(") && s.endsWith(")")) {
+    let depth = 0;
+    let balanced = true;
+    for (let i = 0; i < s.length; i += 1) {
+      const ch = s[i];
+      if (ch === "(") depth += 1;
+      if (ch === ")") depth -= 1;
+      if (depth === 0 && i < s.length - 1) {
+        balanced = false;
+        break;
+      }
+      if (depth < 0) {
+        balanced = false;
+        break;
+      }
+    }
+    if (!balanced || depth !== 0) break;
+    s = s.slice(1, -1).trim();
+  }
+  return s;
+}
+
+function stripPostgresCast(v) {
+  let s = String(v || "").trim();
+  while (true) {
+    const next = s.replace(/\s*::\s*[\w.\[\]"]+\s*$/u, "").trim();
+    if (next === s) break;
+    s = next;
+  }
+  return s;
+}
+
+function toLiquibaseDefaultField(defaultValue) {
+  const raw = String(defaultValue || "").trim();
+  if (!raw) return {};
+
+  const unwrapped = stripOuterParens(stripPostgresCast(raw));
+  if (!unwrapped) return {};
+  if (/^null$/i.test(unwrapped)) return {};
+  if (/^'(?:[^']|'')*'$/u.test(unwrapped)) {
+    return { defaultValue: decodeSqlStringLiteral(unwrapped) };
+  }
+  if (/^(true|false)$/i.test(unwrapped)) {
+    return { defaultValueBoolean: /^true$/i.test(unwrapped) };
+  }
+  if (/^[+-]?\d+(?:\.\d+)?$/.test(unwrapped)) {
+    return { defaultValueNumeric: Number(unwrapped) };
+  }
+  if (/[()]/.test(unwrapped) || /\b(current_|sysdate|systimestamp|now|nextval)\b/i.test(unwrapped)) {
+    return { defaultValueComputed: unwrapped };
+  }
+  return { defaultValue: unwrapped };
+}
+
+function fromLiquibaseDefaultField(column = {}) {
+  if (column.defaultValue != null && String(column.defaultValue).trim() !== "") {
+    return String(column.defaultValue);
+  }
+  if (column.defaultValueNumeric != null && String(column.defaultValueNumeric).trim() !== "") {
+    return String(column.defaultValueNumeric);
+  }
+  if (column.defaultValueBoolean != null) {
+    return column.defaultValueBoolean ? "true" : "false";
+  }
+  if (column.defaultValueDate != null && String(column.defaultValueDate).trim() !== "") {
+    return String(column.defaultValueDate);
+  }
+  if (column.defaultValueComputed != null && String(column.defaultValueComputed).trim() !== "") {
+    return String(column.defaultValueComputed);
+  }
+  if (column.defaultValueSequenceNext != null && String(column.defaultValueSequenceNext).trim() !== "") {
+    return String(column.defaultValueSequenceNext);
+  }
+  return "";
+}
+
 function validateType(value, column) {
   if (value == null || String(value).trim() === "") return;
   const type = normalizeType(column.type);
@@ -521,7 +607,7 @@ function readSchema(changelogPath) {
             name,
             type: String(c.type || ""),
             nullable: constraints.nullable !== false,
-            defaultValue: String(c.defaultValue || "")
+            defaultValue: fromLiquibaseDefaultField(c)
           });
           if (constraints.primaryKey === true) b.primaryKey.push(name);
           if (constraints.primaryKeyName) b.primaryKeyName = String(constraints.primaryKeyName);
@@ -770,7 +856,7 @@ function writeGeneratedChangelog(masterChangelogPath, workspaceObjects) {
           column: {
             name: c.name,
             type: c.type,
-            ...(c.defaultValue ? { defaultValue: c.defaultValue } : {}),
+            ...toLiquibaseDefaultField(c.defaultValue),
             constraints: { nullable: !!c.nullable }
           }
         }))
@@ -957,8 +1043,10 @@ function writeGeneratedChangelog(masterChangelogPath, workspaceObjects) {
 
   const buildRoutineDoc = (routine, type) => {
     const safe = toSafeFileName(routine.name);
+    const dbms = routineDbmsFromType(routine.dbType);
+    const relativeFile = `${dbms}/${safe}.yaml`;
     return {
-      file: `${safe}.yaml`,
+      file: relativeFile,
       doc: {
         databaseChangeLog: [
           {
@@ -976,27 +1064,55 @@ function writeGeneratedChangelog(masterChangelogPath, workspaceObjects) {
       }
     };
   };
+  const removeUnexpectedYamlFiles = (rootDir, expectedRelativeFiles) => {
+    if (!fs.existsSync(rootDir) || !fs.statSync(rootDir).isDirectory()) return;
+    const expected = new Set(Array.from(expectedRelativeFiles || []).map((f) => String(f).replace(/\\/g, "/")));
+    const walk = (dir) => {
+      for (const name of fs.readdirSync(dir)) {
+        const p = path.join(dir, name);
+        const st = fs.statSync(p);
+        if (st.isDirectory()) {
+          walk(p);
+          continue;
+        }
+        if (!/\.ya?ml$/i.test(name)) continue;
+        const rel = path.relative(rootDir, p).replace(/\\/g, "/");
+        if (!expected.has(rel)) fs.rmSync(p, { force: true });
+      }
+    };
+    walk(rootDir);
+  };
+  const removeEmptyDirs = (rootDir) => {
+    if (!fs.existsSync(rootDir) || !fs.statSync(rootDir).isDirectory()) return;
+    const walk = (dir) => {
+      for (const name of fs.readdirSync(dir)) {
+        const p = path.join(dir, name);
+        if (fs.statSync(p).isDirectory()) walk(p);
+      }
+      if (path.resolve(dir) === path.resolve(rootDir)) return;
+      if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
+    };
+    walk(rootDir);
+  };
   const sortedFunctions = Array.from(functionMap.values()).sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
-  for (const fn of sortedFunctions) {
-    const r = buildRoutineDoc(fn, "function");
+  const functionDocs = sortedFunctions.map((fn) => buildRoutineDoc(fn, "function"));
+  for (const r of functionDocs) {
+    fs.mkdirSync(path.dirname(path.join(functionsDir, r.file)), { recursive: true });
     writeTextFileIfChanged(path.join(functionsDir, r.file), `${YAML.stringify(r.doc).trimEnd()}\n`);
   }
-  const expectedFunctionFiles = new Set(sortedFunctions.map((f) => `${toSafeFileName(f.name)}.yaml`));
-  for (const file of fs.readdirSync(functionsDir)) {
-    if (!/\.ya?ml$/i.test(file)) continue;
-    if (!expectedFunctionFiles.has(file)) fs.rmSync(path.join(functionsDir, file), { force: true });
-  }
+  const expectedFunctionFiles = new Set(functionDocs.map((r) => r.file));
+  removeUnexpectedYamlFiles(functionsDir, expectedFunctionFiles);
+  removeEmptyDirs(functionsDir);
 
   const sortedProcedures = Array.from(procedureMap.values()).sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
-  for (const sp of sortedProcedures) {
-    const r = buildRoutineDoc(sp, "procedure");
+  const procedureDocs = sortedProcedures.map((sp) => buildRoutineDoc(sp, "procedure"));
+  for (const r of procedureDocs) {
+    fs.mkdirSync(path.dirname(path.join(proceduresDir, r.file)), { recursive: true });
     writeTextFileIfChanged(path.join(proceduresDir, r.file), `${YAML.stringify(r.doc).trimEnd()}\n`);
   }
-  const expectedProcedureFiles = new Set(sortedProcedures.map((p) => `${toSafeFileName(p.name)}.yaml`));
-  for (const file of fs.readdirSync(proceduresDir)) {
-    if (!/\.ya?ml$/i.test(file)) continue;
-    if (!expectedProcedureFiles.has(file)) fs.rmSync(path.join(proceduresDir, file), { force: true });
-  }
+  const expectedProcedureFiles = new Set(procedureDocs.map((r) => r.file));
+  removeUnexpectedYamlFiles(proceduresDir, expectedProcedureFiles);
+  removeEmptyDirs(proceduresDir);
 
   const masterDoc = {
     databaseChangeLog: [
@@ -1085,17 +1201,17 @@ function writeGeneratedChangelog(masterChangelogPath, workspaceObjects) {
     }))
   };
   const functionsDoc = {
-    databaseChangeLog: sortedFunctions.map((f) => ({
+    databaseChangeLog: functionDocs.map((r) => ({
       include: {
-        file: `functions/${toSafeFileName(f.name)}.yaml`,
+        file: `functions/${r.file}`,
         relativeToChangelogFile: true
       }
     }))
   };
   const proceduresDoc = {
-    databaseChangeLog: sortedProcedures.map((p) => ({
+    databaseChangeLog: procedureDocs.map((r) => ({
       include: {
-        file: `procedures/${toSafeFileName(p.name)}.yaml`,
+        file: `procedures/${r.file}`,
         relativeToChangelogFile: true
       }
     }))
