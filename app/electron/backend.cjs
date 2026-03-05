@@ -829,6 +829,14 @@ function quoteIdent(id) {
   return `[${String(id).replace(/]/g, "]]")}]`;
 }
 
+function defaultPkName(tableName) {
+  return `PK_${String(tableName || "").trim()}`.toUpperCase();
+}
+
+function defaultFkName(tableName, order) {
+  return `FK_${String(tableName || "").trim()}_${Number(order)}`.toUpperCase();
+}
+
 function refreshSqlRuntime() {
   alasql("DROP DATABASE IF EXISTS dmdb");
   alasql("CREATE DATABASE dmdb");
@@ -1112,8 +1120,19 @@ const dm = {
         ...fk,
         childTable: fk.childTable === from ? to : fk.childTable,
         parentTable: fk.parentTable === from ? to : fk.parentTable
-      }));
-      if ((nextSchema.primaryKeyName || "") === `PK_${from}`) nextSchema.primaryKeyName = `PK_${to}`;
+      })).map((fk) => {
+        if (fk.childTable !== to) return fk;
+        const fkName = String(fk.name || "");
+        const legacyPrefix = `fk_${from}_`;
+        const upperPrefix = `FK_${from}_`;
+        const suffix = fkName.startsWith(legacyPrefix) ? fkName.slice(legacyPrefix.length) : fkName.startsWith(upperPrefix) ? fkName.slice(upperPrefix.length) : "";
+        if (!/^\d+$/.test(suffix)) return fk;
+        return { ...fk, name: defaultFkName(to, Number(suffix)) };
+      });
+      const pkName = String(nextSchema.primaryKeyName || "");
+      const legacyDefault = `PK_${from}`;
+      const upperDefault = defaultPkName(from);
+      if (pkName === legacyDefault || pkName === upperDefault) nextSchema.primaryKeyName = defaultPkName(to);
       nextSchemas.set(nextKey, nextSchema);
     }
     state.schemas = nextSchemas;

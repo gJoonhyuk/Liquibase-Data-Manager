@@ -21,13 +21,22 @@ export function useSchemaEditorState({ selectedTable, persistedTableNames, schem
   const [unsavedSchemaOpen, setUnsavedSchemaOpen] = useState(false);
   const [columnModalOpen, setColumnModalOpen] = useState(false);
   const [newCol, setNewCol] = useState({ name: "", ...defaultTypeSpec("STRING"), defaultValue: "", nullable: true, pkOrder: "" });
+  const defaultPkName = (tableName) => `PK_${String(tableName || "").trim()}`.toUpperCase();
+  const defaultFkName = (tableName, n) => `FK_${String(tableName || "").trim()}_${Number(n)}`.toUpperCase();
 
   const selectedSchema = schemaMap[selectedTable];
   const normalizeSchema = (schema) => {
     const normalized = clone(schema);
     normalized.primaryKey = normalized.primaryKey || [];
-    normalized.primaryKeyName = normalized.primaryKeyName || (normalized.primaryKey.length ? `PK_${selectedTable}` : "");
-    normalized.foreignKeys = normalized.foreignKeys || [];
+    normalized.primaryKeyName = normalized.primaryKeyName || (normalized.primaryKey.length ? defaultPkName(selectedTable) : "");
+    normalized.foreignKeys = (normalized.foreignKeys || []).map((fk) => ({
+      ...fk,
+      name: String(fk?.name || ""),
+      childTable: String(fk?.childTable || selectedTable),
+      childColumns: Array.isArray(fk?.childColumns) ? fk.childColumns : [],
+      parentTable: String(fk?.parentTable || ""),
+      parentColumns: Array.isArray(fk?.parentColumns) ? fk.parentColumns : []
+    }));
     normalized.indexes = normalized.indexes || [];
     normalized.columns = (normalized.columns || []).map((c) => ({ ...c, defaultValue: c.defaultValue || "" }));
     return normalized;
@@ -157,14 +166,17 @@ export function useSchemaEditorState({ selectedTable, persistedTableNames, schem
       const firstParent = Object.keys(schemaMap).find((t) => t !== selectedTable) || selectedTable;
       s.foreignKeys = [
         ...(s.foreignKeys || []),
-        { name: `fk_${selectedTable}_${n}`, childTable: selectedTable, childColumns: [""], parentTable: firstParent, parentColumns: [""] }
+        { name: defaultFkName(selectedTable, n), childTable: selectedTable, childColumns: [""], parentTable: firstParent, parentColumns: [""] }
       ];
       return s;
     });
 
   const updateForeignKey = (fkIdx, patch) =>
     updateSchemaDraft((s) => {
-      s.foreignKeys[fkIdx] = { ...s.foreignKeys[fkIdx], ...patch };
+      const list = [...(s.foreignKeys || [])];
+      if (!list[fkIdx]) return s;
+      list[fkIdx] = { ...list[fkIdx], ...patch };
+      s.foreignKeys = list;
       return s;
     });
 

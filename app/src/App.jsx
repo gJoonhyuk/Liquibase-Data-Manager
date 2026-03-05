@@ -36,6 +36,7 @@ export default function App() {
     const rowCountMap = new Map((workspace.tables || []).map((t) => [t.tableName, t.rowCount]));
     return Object.keys(workspace.schemaMap || {}).map((tableName) => ({ tableName, rowCount: rowCountMap.get(tableName) || 0 }));
   }, [workspace.tables, workspace.schemaMap]);
+  const defaultPkName = (tableName) => `PK_${String(tableName || "").trim()}`.toUpperCase();
 
   const validateTableName = (rawName) => {
     const name = (rawName || "").trim();
@@ -64,7 +65,7 @@ export default function App() {
         tableName: name,
         columns: [{ name: "id", type: "STRING(64)", nullable: false, defaultValue: "" }],
         primaryKey: ["id"],
-        primaryKeyName: `PK_${name}`,
+        primaryKeyName: defaultPkName(name),
         foreignKeys: [],
         indexes: []
       }
