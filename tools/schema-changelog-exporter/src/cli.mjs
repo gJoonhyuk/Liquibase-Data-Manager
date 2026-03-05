@@ -618,7 +618,65 @@ function tableToYaml(table, author) {
     databaseChangeLog: [
       {
         changeSet: {
-          id: `generated-${table.tableName}-v1`,
+          id: `generated-${table.tableName}-create-v1`,
+          author,
+          changes
+        }
+      }
+    ]
+  };
+}
+
+function dataToYaml(table, author) {
+  return {
+    databaseChangeLog: [
+      {
+        changeSet: {
+          id: `generated-${table.tableName}-load-v1`,
+          author,
+          changes: [
+            {
+              loadData: {
+                tableName: table.tableName,
+                file: `../../../../${table.tableName}.csv`,
+                relativeToChangelogFile: true,
+                encoding: "UTF-8"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  };
+}
+
+function constraintsToYaml(table, author) {
+  const changes = [];
+  if ((table.primaryKey || []).length) {
+    changes.push({
+      addPrimaryKey: {
+        tableName: table.tableName,
+        columnNames: table.primaryKey.join(","),
+        ...(table.primaryKeyName ? { constraintName: table.primaryKeyName } : {})
+      }
+    });
+  }
+  for (const idx of table.indexes || []) {
+    changes.push({
+      createIndex: {
+        tableName: table.tableName,
+        indexName: idx.name,
+        ...(idx.unique ? { unique: true } : {}),
+        columns: (idx.columns || []).map((name) => ({ column: { name } }))
+      }
+    });
+  }
+  if (!changes.length) return null;
+  return {
+    databaseChangeLog: [
+      {
+        changeSet: {
+          id: `generated-${table.tableName}-constraints-v1`,
           author,
           changes
         }
@@ -655,8 +713,12 @@ function fkToYaml(table, author) {
 function writeGeneratedLayout(baseOutDir, tables, author) {
   const outDir = path.resolve(baseOutDir);
   const tablesDir = path.join(outDir, "tables");
+  const dataDir = path.join(outDir, "data");
+  const constraintsDir = path.join(outDir, "constraints");
   const fksDir = path.join(outDir, "fks");
   ensureDir(tablesDir);
+  ensureDir(dataDir);
+  ensureDir(constraintsDir);
   ensureDir(fksDir);
   logInfo(`Writing changelog files to: ${outDir}`);
 
@@ -666,6 +728,19 @@ function writeGeneratedLayout(baseOutDir, tables, author) {
     const filePath = path.join(tablesDir, `${table.tableName}.yaml`);
     writeYaml(filePath, tableToYaml(table, author));
     logInfo(`Write table file [${i + 1}/${sorted.length}]: ${filePath}`);
+
+    const dataPath = path.join(dataDir, `${table.tableName}.yaml`);
+    writeYaml(dataPath, dataToYaml(table, author));
+    logInfo(`Write data file  [${i + 1}/${sorted.length}]: ${dataPath}`);
+
+    const constraintsPath = path.join(constraintsDir, `${table.tableName}.yaml`);
+    const constraintsDoc = constraintsToYaml(table, author);
+    if (constraintsDoc) {
+      writeYaml(constraintsPath, constraintsDoc);
+      logInfo(`Write cst file   [${i + 1}/${sorted.length}]: ${constraintsPath}`);
+    } else if (fs.existsSync(constraintsPath)) {
+      fs.rmSync(constraintsPath, { force: true });
+    }
 
     const fkPath = path.join(fksDir, `${table.tableName}.yaml`);
     const fkDoc = fkToYaml(table, author);
@@ -681,6 +756,22 @@ function writeGeneratedLayout(baseOutDir, tables, author) {
   for (const file of fs.readdirSync(tablesDir)) {
     if (!/\.ya?ml$/i.test(file)) continue;
     if (!expectedTableFiles.has(file)) fs.rmSync(path.join(tablesDir, file), { force: true });
+  }
+
+  const expectedDataFiles = new Set(sorted.map((t) => `${t.tableName}.yaml`));
+  for (const file of fs.readdirSync(dataDir)) {
+    if (!/\.ya?ml$/i.test(file)) continue;
+    if (!expectedDataFiles.has(file)) fs.rmSync(path.join(dataDir, file), { force: true });
+  }
+
+  const expectedConstraintsFiles = new Set(
+    sorted
+      .filter((t) => (t.primaryKey || []).length || (t.indexes || []).length)
+      .map((t) => `${t.tableName}.yaml`)
+  );
+  for (const file of fs.readdirSync(constraintsDir)) {
+    if (!/\.ya?ml$/i.test(file)) continue;
+    if (!expectedConstraintsFiles.has(file)) fs.rmSync(path.join(constraintsDir, file), { force: true });
   }
 
   const expectedFkFiles = new Set(
@@ -701,8 +792,22 @@ function writeGeneratedLayout(baseOutDir, tables, author) {
             file: `tables/${t.tableName}.yaml`,
             relativeToChangelogFile: true
           }
+        },
+        {
+          include: {
+            file: `data/${t.tableName}.yaml`,
+            relativeToChangelogFile: true
+          }
         }
       ];
+      if ((t.primaryKey || []).length || (t.indexes || []).length) {
+        entries.push({
+          include: {
+            file: `constraints/${t.tableName}.yaml`,
+            relativeToChangelogFile: true
+          }
+        });
+      }
       if ((t.foreignKeys || []).length) {
         entries.push({
           include: {

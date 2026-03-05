@@ -495,16 +495,23 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
   const requestedBase = path.basename(requestedPath).toLowerCase();
   const requestedDirBase = path.basename(requestedDir).toLowerCase();
 
-  // If user selected a table fragment (for example: .../tables/FOO.yaml),
+  // If user selected a fragment file (for example: .../tables/FOO.yaml),
   // normalize output to its parent changelog dir and write master as generated-master.yaml.
   const looksLikeMaster = /master/.test(requestedBase);
-  const baseDir = requestedDirBase === "tables" || requestedDirBase === "fks" ? path.dirname(requestedDir) : requestedDir;
+  const baseDir =
+    requestedDirBase === "tables" || requestedDirBase === "data" || requestedDirBase === "constraints" || requestedDirBase === "fks"
+      ? path.dirname(requestedDir)
+      : requestedDir;
   const masterPath = looksLikeMaster ? requestedPath : path.join(baseDir, "generated-master.yaml");
   const dir = path.dirname(masterPath);
   fs.mkdirSync(dir, { recursive: true });
   const tablesDir = path.join(dir, "tables");
+  const dataDir = path.join(dir, "data");
+  const constraintsDir = path.join(dir, "constraints");
   const fksDir = path.join(dir, "fks");
   fs.mkdirSync(tablesDir, { recursive: true });
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.mkdirSync(constraintsDir, { recursive: true });
   fs.mkdirSync(fksDir, { recursive: true });
 
   for (const file of fs.readdirSync(dir)) {
@@ -518,8 +525,8 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
   );
 
   for (const table of sortedTables) {
-    const tableChanges = [];
-    tableChanges.push({
+    const createChanges = [];
+    createChanges.push({
       createTable: {
         tableName: table.tableName,
         columns: (table.columns || []).map((c) => ({
@@ -532,8 +539,10 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
         }))
       }
     });
+
+    const constraintsChanges = [];
     if ((table.primaryKey || []).length) {
-      tableChanges.push({
+      constraintsChanges.push({
         addPrimaryKey: {
           tableName: table.tableName,
           columnNames: table.primaryKey.join(","),
@@ -542,7 +551,7 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
       });
     }
     for (const index of table.indexes || []) {
-      tableChanges.push({
+      constraintsChanges.push({
         createIndex: {
           tableName: table.tableName,
           indexName: index.name,
@@ -557,14 +566,55 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
       databaseChangeLog: [
         {
           changeSet: {
-            id: `generated-${table.tableName}-v1`,
+            id: `generated-${table.tableName}-create-v1`,
             author: "data-manager",
-            changes: tableChanges
+            changes: createChanges
           }
         }
       ]
     };
     writeTextFileIfChanged(tableFile, `${YAML.stringify(tableDoc).trimEnd()}\n`);
+
+    const dataFile = path.join(dataDir, `${table.tableName}.yaml`);
+    const dataDoc = {
+      databaseChangeLog: [
+        {
+          changeSet: {
+            id: `generated-${table.tableName}-load-v1`,
+            author: "data-manager",
+            changes: [
+              {
+                loadData: {
+                  tableName: table.tableName,
+                  file: `../../../../${table.tableName}.csv`,
+                  relativeToChangelogFile: true,
+                  encoding: "UTF-8"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    };
+    writeTextFileIfChanged(dataFile, `${YAML.stringify(dataDoc).trimEnd()}\n`);
+
+    const constraintsFile = path.join(constraintsDir, `${table.tableName}.yaml`);
+    if (constraintsChanges.length) {
+      const constraintsDoc = {
+        databaseChangeLog: [
+          {
+            changeSet: {
+              id: `generated-${table.tableName}-constraints-v1`,
+              author: "data-manager",
+              changes: constraintsChanges
+            }
+          }
+        ]
+      };
+      writeTextFileIfChanged(constraintsFile, `${YAML.stringify(constraintsDoc).trimEnd()}\n`);
+    } else if (fs.existsSync(constraintsFile)) {
+      fs.rmSync(constraintsFile, { force: true });
+    }
 
     const fkChanges = [];
     for (const fk of table.foreignKeys || []) {
@@ -604,6 +654,22 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
     if (!expectedTableFiles.has(file)) fs.rmSync(path.join(tablesDir, file), { force: true });
   }
 
+  const expectedDataFiles = new Set(sortedTables.map((t) => `${t.tableName}.yaml`));
+  for (const file of fs.readdirSync(dataDir)) {
+    if (!/\.ya?ml$/i.test(file)) continue;
+    if (!expectedDataFiles.has(file)) fs.rmSync(path.join(dataDir, file), { force: true });
+  }
+
+  const expectedConstraintFiles = new Set(
+    sortedTables
+      .filter((t) => (t.primaryKey || []).length || (t.indexes || []).length)
+      .map((t) => `${t.tableName}.yaml`)
+  );
+  for (const file of fs.readdirSync(constraintsDir)) {
+    if (!/\.ya?ml$/i.test(file)) continue;
+    if (!expectedConstraintFiles.has(file)) fs.rmSync(path.join(constraintsDir, file), { force: true });
+  }
+
   const expectedFkFiles = new Set(
     sortedTables
       .filter((t) => (t.foreignKeys || []).length > 0)
@@ -622,8 +688,22 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
             file: `tables/${t.tableName}.yaml`,
             relativeToChangelogFile: true
           }
+        },
+        {
+          include: {
+            file: `data/${t.tableName}.yaml`,
+            relativeToChangelogFile: true
+          }
         }
       ];
+      if ((t.primaryKey || []).length || (t.indexes || []).length) {
+        includes.push({
+          include: {
+            file: `constraints/${t.tableName}.yaml`,
+            relativeToChangelogFile: true
+          }
+        });
+      }
       if ((t.foreignKeys || []).length) {
         includes.push({
           include: {
