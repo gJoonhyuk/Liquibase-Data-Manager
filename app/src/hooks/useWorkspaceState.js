@@ -118,7 +118,12 @@ export function useWorkspaceState() {
       await api.openWorkspace({ path: workspacePath, changelogPath });
       await refreshMeta();
       setWorkspaceOpened(true);
-      setMessage("워크스페이스를 열었습니다.", "openWorkspace");
+      const formatStatus = await api.getChangelogFormatStatus().catch(() => ({ format: "unknown", migrationNeeded: false }));
+      if (formatStatus?.migrationNeeded) {
+        setMessage("워크스페이스를 열었습니다. 구버전 changelog가 감지되었습니다. Save All로 최신 포맷으로 변환하세요.", "openWorkspace");
+      } else {
+        setMessage("워크스페이스를 열었습니다.", "openWorkspace");
+      }
     } catch (e) {
       if (String(e?.code || "") === "CANCELED" || /canceled/i.test(String(e?.message || ""))) {
         setMessage("워크스페이스 열기를 취소했습니다.", "openWorkspace");

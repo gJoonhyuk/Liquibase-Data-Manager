@@ -15,6 +15,7 @@ export function AppHeader({
   onPickWorkspace,
   onPickChangelog,
   onOpenWorkspace,
+  onSaveAll,
   onCancelOpenWorkspace,
   onValidate,
   message,
@@ -25,8 +26,10 @@ export function AppHeader({
   onClearError,
   onOpenActionLog,
   onOpenErrorLog,
-  openingWorkspace
+  openingWorkspace,
+  savingAll
 }) {
+  const busy = openingWorkspace || savingAll;
   return (
     <Card className="rounded-none border-x-0 border-t-0">
       <CardHeader className="py-3">
@@ -46,22 +49,22 @@ export function AppHeader({
         </div>
       </CardHeader>
       <CardContent className="pb-3">
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_90px_40px] items-end gap-2">
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_100px_110px_40px] items-end gap-2">
           <div className="grid grid-cols-[minmax(0,1fr)_40px] items-end gap-2">
             <div className="space-y-1">
               <Label className="text-[11px] text-muted-foreground">Data</Label>
-              <Input value={workspacePath} onChange={(e) => onWorkspacePathChange(e.target.value)} placeholder="CSV root directory" disabled={openingWorkspace} />
+              <Input value={workspacePath} onChange={(e) => onWorkspacePathChange(e.target.value)} placeholder="CSV root directory" disabled={busy} />
             </div>
-            <Button variant="outline" size="icon" onClick={onPickWorkspace} disabled={openingWorkspace}>
+            <Button variant="outline" size="icon" onClick={onPickWorkspace} disabled={busy}>
               <FolderOpen className="h-4 w-4" />
             </Button>
           </div>
           <div className="grid grid-cols-[minmax(0,1fr)_40px] items-end gap-2">
             <div className="space-y-1">
               <Label className="text-[11px] text-muted-foreground">Changelog</Label>
-              <Input value={changelogPath} onChange={(e) => onChangelogPathChange(e.target.value)} placeholder="Changelog path" disabled={openingWorkspace} />
+              <Input value={changelogPath} onChange={(e) => onChangelogPathChange(e.target.value)} placeholder="Changelog path" disabled={busy} />
             </div>
-            <Button variant="outline" size="icon" onClick={onPickChangelog} disabled={openingWorkspace}>
+            <Button variant="outline" size="icon" onClick={onPickChangelog} disabled={busy}>
               <File className="h-4 w-4" />
             </Button>
           </div>
@@ -71,9 +74,12 @@ export function AppHeader({
               cancel
             </Button>
           ) : (
-            <Button onClick={onOpenWorkspace}>open</Button>
+            <Button onClick={onOpenWorkspace} disabled={savingAll}>open</Button>
           )}
-          <Button variant="outline" size="icon" onClick={onValidate} disabled={!workspaceOpened || openingWorkspace}>
+          <Button variant="secondary" onClick={onSaveAll} disabled={!workspaceOpened || busy}>
+            Save All
+          </Button>
+          <Button variant="outline" size="icon" onClick={onValidate} disabled={!workspaceOpened || busy}>
             <ShieldCheck className="h-4 w-4" />
           </Button>
         </div>

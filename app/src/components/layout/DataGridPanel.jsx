@@ -23,7 +23,8 @@ export function DataGridPanel({
   setError,
   workspaceReady,
   jumpToRowRequest,
-  onJumpToRowHandled
+  onJumpToRowHandled,
+  onGlobalSaveBindingChange
 }) {
   const [compactGridActions, setCompactGridActions] = useState(false);
   const [columnWidths, setColumnWidths] = useState({});
@@ -51,6 +52,16 @@ export function DataGridPanel({
     setMessage,
     setError
   });
+
+  useEffect(() => {
+    if (!onGlobalSaveBindingChange) return;
+    onGlobalSaveBindingChange({
+      hasDataUnsavedChanges: !!grid.hasDataUnsavedChanges,
+      buildDataSavePayload: () => grid.buildDataSavePayload(),
+      reloadCurrentTable: () => grid.reloadCurrentTable()
+    });
+    return () => onGlobalSaveBindingChange(null);
+  }, [onGlobalSaveBindingChange, grid.hasDataUnsavedChanges, selectedTable, columns, columnDefs]);
 
   useEffect(() => {
     const el = gridActionsRef.current;

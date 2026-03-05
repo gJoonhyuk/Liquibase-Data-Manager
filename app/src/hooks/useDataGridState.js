@@ -416,6 +416,21 @@ export function useDataGridState({
     }
   };
 
+  const buildDataSavePayload = () => {
+    if (!selectedTable) return null;
+    const rowsToSave = rowsToPersist(orderedRows);
+    const validationError = validateRowsForSave(rowsToSave);
+    if (validationError) throw new Error(validationError);
+    return {
+      table: selectedTable,
+      rows: rowsToSave
+    };
+  };
+
+  const reloadCurrentTable = async () => {
+    await loadRows(selectedTable);
+  };
+
   const onRequestDeleteSelected = async () => {
     if (!selectedRowIds.size) return;
     if (hasDataUnsavedChanges) {
@@ -558,6 +573,8 @@ export function useDataGridState({
     loadRows,
     onRequestSaveTable,
     onSaveTable,
+    buildDataSavePayload,
+    reloadCurrentTable,
     onApplyCascadeAndSave,
     onRequestDeleteSelected,
     onApplyCascadeDelete,

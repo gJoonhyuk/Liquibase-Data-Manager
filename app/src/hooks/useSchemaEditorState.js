@@ -294,6 +294,16 @@ export function useSchemaEditorState({ selectedTable, persistedTableNames, schem
     }
   };
 
+  const buildSchemaSavePayload = () => {
+    const nextMap = { ...schemaMap };
+    if (hasSchemaUnsavedChanges) {
+      const validationError = validateSchemaDraft(schemaDraft);
+      if (validationError) throw new Error(validationError);
+      nextMap[selectedTable] = schemaDraft;
+    }
+    return Object.values(nextMap);
+  };
+
   return {
     schemaDraft,
     columns,
@@ -323,6 +333,7 @@ export function useSchemaEditorState({ selectedTable, persistedTableNames, schem
     addFkPair,
     removeFkPair,
     removeForeignKey,
+    buildSchemaSavePayload,
     onSaveSchema,
     onRevertSchema
   };

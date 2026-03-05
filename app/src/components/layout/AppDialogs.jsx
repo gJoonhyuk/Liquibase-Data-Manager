@@ -29,13 +29,16 @@ export function AppDialogs({
   onClearErrorLogs,
   openingWorkspace,
   openProgress,
+  savingAll,
+  saveProgress,
   onCancelOpenWorkspace
 }) {
   const latestError = errorLogs?.[0];
   const latestErrorRef = useRef(null);
+  const activeProgress = openingWorkspace ? openProgress : savingAll ? saveProgress : { current: 0, total: 0 };
   const progressPercent = (() => {
-    const total = Number(openProgress?.total || 0);
-    const current = Number(openProgress?.current || 0);
+    const total = Number(activeProgress?.total || 0);
+    const current = Number(activeProgress?.current || 0);
     if (total <= 0) return 0;
     const raw = (current / total) * 100;
     const clamped = Math.max(0, Math.min(100, raw));
@@ -71,32 +74,34 @@ export function AppDialogs({
 
   return (
     <>
-      {openingWorkspace && (
+      {(openingWorkspace || savingAll) && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35">
           <div className="w-[min(560px,92vw)] rounded-lg border bg-background p-4 shadow-xl">
             <div className="mb-2 flex items-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin" />
-              <p className="text-sm font-medium">워크스페이스 로딩 중...</p>
+              <p className="text-sm font-medium">{openingWorkspace ? "워크스페이스 로딩 중..." : "전체 저장 중..."}</p>
             </div>
             <p className="mb-2 text-xs text-muted-foreground">
-              step: {openProgress?.step || "-"} {openProgress?.message ? ` / ${openProgress.message}` : ""}
+              step: {activeProgress?.step || "-"} {activeProgress?.message ? ` / ${activeProgress.message}` : ""}
             </p>
             <div className="h-2 w-full overflow-hidden rounded bg-muted">
               <div
                 className="h-full bg-primary transition-all"
                 style={{
-                  width: openProgress?.total > 0 ? `${progressPercent.toFixed(2)}%` : "45%"
+                  width: activeProgress?.total > 0 ? `${progressPercent.toFixed(2)}%` : "45%"
                 }}
               />
             </div>
             <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
               <span>
-                {openProgress?.current || 0} / {openProgress?.total || 0}
+                {activeProgress?.current || 0} / {activeProgress?.total || 0}
               </span>
-              {openProgress?.total > 0 && <span>{progressPercent.toFixed(1)}%</span>}
-              <Button variant="destructive" size="sm" onClick={onCancelOpenWorkspace}>
-                Cancel
-              </Button>
+              {activeProgress?.total > 0 && <span>{progressPercent.toFixed(1)}%</span>}
+              {openingWorkspace && (
+                <Button variant="destructive" size="sm" onClick={onCancelOpenWorkspace}>
+                  Cancel
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -107,7 +112,7 @@ export function AppDialogs({
           <DialogHeader>
             <DialogTitle>저장 차단</DialogTitle>
           </DialogHeader>
-          <p className="text-sm">테이블 정보(Structure Editor) 변경 사항이 저장되지 않았습니다. 먼저 `Save Table Info`를 실행한 뒤 다시 시도하세요.</p>
+          <p className="text-sm">테이블 정보(Structure Editor) 변경 사항이 저장되지 않았습니다. 먼저 `Save All`을 실행한 뒤 다시 시도하세요.</p>
           <DialogFooter>
             <Button onClick={() => onUnsavedSchemaOpenChange(false)}>확인</Button>
           </DialogFooter>

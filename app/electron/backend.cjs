@@ -19,8 +19,11 @@ class AppError extends Error {
 const state = {
   workspacePath: null,
   changelogPath: null,
+  changelogFormat: "unknown",
+  changelogMigrationNeeded: false,
   schemas: new Map(),
   rowsByTable: new Map(),
+  csvEolByTable: new Map(),
   pendingChangeSets: new Map(),
   openWorkspaceJob: {
     running: false,
@@ -139,6 +142,12 @@ function readCsvTable(csvPath) {
   return records.map((r) => ({ id: uid(), values: { ...r } }));
 }
 
+function detectFileEol(filePath) {
+  if (!fs.existsSync(filePath)) return "\n";
+  const raw = fs.readFileSync(filePath, "utf8");
+  return raw.includes("\r\n") ? "\r\n" : "\n";
+}
+
 async function readCsvTableWithProgress(csvPath, { onProgress, isCanceled } = {}) {
   if (!fs.existsSync(csvPath)) {
     if (onProgress) onProgress(1);
@@ -212,7 +221,7 @@ async function readCsvTableWithProgress(csvPath, { onProgress, isCanceled } = {}
   });
 }
 
-function writeCsvTable(csvPath, rows, headers) {
+function writeCsvTable(csvPath, rows, headers, preferredEol = "") {
   fs.mkdirSync(path.dirname(csvPath), { recursive: true });
   const records = rows.map((row) => {
     const rec = {};
@@ -222,17 +231,17 @@ function writeCsvTable(csvPath, rows, headers) {
     return rec;
   });
   const csv = stringifyCsv(records, { header: true, columns: headers });
-  writeTextFileIfChanged(csvPath, csv);
+  writeTextFileIfChanged(csvPath, csv, preferredEol);
 }
 
 function normalizeEol(text, eol = "\n") {
   return String(text || "").replace(/\r?\n/g, eol);
 }
 
-function writeTextFileIfChanged(filePath, text) {
+function writeTextFileIfChanged(filePath, text, preferredEol = "") {
   const exists = fs.existsSync(filePath);
   const prev = exists ? fs.readFileSync(filePath, "utf8") : null;
-  const eol = prev && prev.includes("\r\n") ? "\r\n" : "\n";
+  const eol = preferredEol || (prev && prev.includes("\r\n") ? "\r\n" : "\n");
   const next = normalizeEol(String(text || ""), eol);
   if (prev != null && prev === next) return false;
   const temp = `${filePath}.tmp`;
@@ -487,6 +496,46 @@ function resolveDefaultMasterChangelogPath(workspacePath) {
     return a.localeCompare(b);
   });
   return candidates[0];
+}
+
+function detectChangelogFormat(changelogPath) {
+  const resolvedInput = path.resolve(changelogPath);
+  const inputBase = path.basename(resolvedInput).toLowerCase();
+  const inputDir = path.dirname(resolvedInput);
+  const inputDirBase = path.basename(inputDir).toLowerCase();
+  const rootDir =
+    inputDirBase === "tables" || inputDirBase === "data" || inputDirBase === "constraints" || inputDirBase === "fks"
+      ? path.dirname(inputDir)
+      : inputDir;
+  const masterPath = /master/.test(inputBase)
+    ? resolvedInput
+    : (fs.existsSync(path.join(rootDir, "generated-master.yaml"))
+      ? path.join(rootDir, "generated-master.yaml")
+      : (fs.existsSync(path.join(rootDir, "generated-master.yml")) ? path.join(rootDir, "generated-master.yml") : null));
+
+  if (!masterPath || !fs.existsSync(masterPath)) {
+    return { format: "unknown", migrationNeeded: false, reasons: ["master changelog not found"] };
+  }
+  try {
+    const raw = fs.readFileSync(masterPath, "utf8");
+    const root = YAML.parse(raw) || {};
+    const entries = Array.isArray(root.databaseChangeLog) ? root.databaseChangeLog : [];
+    const includeSet = new Set(
+      entries
+        .map((e) => String(e?.include?.file || "").replace(/\\/g, "/").toLowerCase())
+        .filter(Boolean)
+    );
+    const hasLatestMaster =
+      includeSet.has("tables.yaml") &&
+      includeSet.has("data.yaml") &&
+      includeSet.has("constraints.yaml");
+    if (!hasLatestMaster) {
+      return { format: "legacy", migrationNeeded: true, reasons: ["master include layout is legacy"] };
+    }
+    return { format: "latest", migrationNeeded: false, reasons: [] };
+  } catch (e) {
+    return { format: "unknown", migrationNeeded: false, reasons: [String(e?.message || "failed to parse master")] };
+  }
 }
 
 function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
@@ -763,12 +812,27 @@ function sanitizeRow(schema, values = {}) {
   return out;
 }
 
+function setSchemasFromTables(tables) {
+  const next = new Map();
+  for (const t of tables || []) {
+    if (!t?.tableName) throw new AppError("Table name is required");
+    if (next.has(t.tableName)) throw new AppError(`Duplicate table name: ${t.tableName}`);
+    if (!Array.isArray(t.columns) || !t.columns.length) throw new AppError(`Table must have at least one column: ${t.tableName}`);
+    next.set(t.tableName, t);
+    if (!state.rowsByTable.has(t.tableName)) state.rowsByTable.set(t.tableName, []);
+  }
+  state.schemas = next;
+}
+
 function saveAllToCsv() {
   ensureOpen();
   for (const [tableName, schema] of state.schemas.entries()) {
     const headers = (schema.columns || []).map((c) => c.name);
     const rows = state.rowsByTable.get(tableName) || [];
-    writeCsvTable(path.join(state.workspacePath, `${tableName}.csv`), rows, headers);
+    const csvPath = path.join(state.workspacePath, `${tableName}.csv`);
+    const preferredEol = state.csvEolByTable.get(tableName) || detectFileEol(csvPath);
+    writeCsvTable(csvPath, rows, headers, preferredEol);
+    state.csvEolByTable.set(tableName, preferredEol);
   }
 }
 
@@ -1094,8 +1158,12 @@ const dm = {
 
       state.workspacePath = path.resolve(workspacePath);
       state.changelogPath = effectiveChangelog;
+      const format = detectChangelogFormat(effectiveChangelog);
+      state.changelogFormat = format.format;
+      state.changelogMigrationNeeded = !!format.migrationNeeded;
       state.schemas = new Map();
       state.rowsByTable = new Map();
+      state.csvEolByTable = new Map();
       state.pendingChangeSets = new Map();
 
       if (!schemas.size) {
@@ -1123,6 +1191,7 @@ const dm = {
           const columns = Object.keys(first).map((name) => ({ name, type: "varchar(255)", nullable: true, defaultValue: "" }));
           state.schemas.set(tableName, { tableName, columns, primaryKeyName: "", primaryKey: [], foreignKeys: [], indexes: [] });
           state.rowsByTable.set(tableName, rows);
+          state.csvEolByTable.set(tableName, detectFileEol(path.join(state.workspacePath, file)));
           updateOpenJob({ current: base + 100, total: totalUnits, message: `loaded ${tableName}` });
           await yieldToEventLoop();
         }
@@ -1152,6 +1221,7 @@ const dm = {
           }
         });
         state.rowsByTable.set(tableName, rows);
+        state.csvEolByTable.set(tableName, detectFileEol(path.join(state.workspacePath, `${tableName}.csv`)));
         updateOpenJob({ current: base + 100, total: totalUnits, message: `loaded ${tableName}` });
         tableIdx += 1;
         await yieldToEventLoop();
@@ -1276,16 +1346,62 @@ const dm = {
 
   updateSchema(tables) {
     ensureOpen();
-    const next = new Map();
-    for (const t of tables || []) {
-      if (!t?.tableName) throw new AppError("Table name is required");
-      if (next.has(t.tableName)) throw new AppError(`Duplicate table name: ${t.tableName}`);
-      if (!Array.isArray(t.columns) || !t.columns.length) throw new AppError(`Table must have at least one column: ${t.tableName}`);
-      next.set(t.tableName, t);
-      if (!state.rowsByTable.has(t.tableName)) state.rowsByTable.set(t.tableName, []);
-    }
-    state.schemas = next;
+    setSchemasFromTables(tables);
     return { status: "updated" };
+  },
+
+  getChangelogFormatStatus() {
+    ensureOpen();
+    return {
+      format: state.changelogFormat || "unknown",
+      migrationNeeded: !!state.changelogMigrationNeeded
+    };
+  },
+
+  saveAll({ tables, dataByTable, options } = {}) {
+    ensureOpen();
+    const backupSchemas = clone(Object.fromEntries(state.schemas.entries()));
+    const backupRows = clone(Object.fromEntries(state.rowsByTable.entries()));
+    try {
+      if (Array.isArray(tables) && tables.length) {
+        setSchemasFromTables(tables);
+      }
+
+      const updates = dataByTable && typeof dataByTable === "object" ? dataByTable : {};
+      for (const [tableName, rows] of Object.entries(updates)) {
+        const schema = state.schemas.get(tableName);
+        if (!schema) throw new AppError(`Unknown table: ${tableName}`);
+        const sanitized = (rows || []).map((row) => ({
+          id: row?.id || uid(),
+          values: sanitizeRow(schema, row?.values || {})
+        }));
+        state.rowsByTable.set(tableName, sanitized);
+      }
+
+      const skipConstraintValidation = options?.skipConstraintValidation === true || state.changelogMigrationNeeded;
+      if (!skipConstraintValidation) {
+        const report = validateAll();
+        if (report.errors.length) throw new AppError(`Validation failed: ${report.errors[0]}`);
+      }
+      saveAllToCsv();
+
+      const forceChangelog = options?.forceChangelog === true;
+      let changelogSaved = false;
+      let migrated = false;
+      let outPath = "";
+      if (forceChangelog || state.changelogMigrationNeeded) {
+        outPath = writeGeneratedChangelog(state.changelogPath, state.schemas);
+        changelogSaved = true;
+        migrated = !!state.changelogMigrationNeeded;
+        state.changelogFormat = "latest";
+        state.changelogMigrationNeeded = false;
+      }
+      return { status: "saved", changelogSaved, migrated, path: outPath };
+    } catch (e) {
+      state.schemas = new Map(Object.entries(backupSchemas));
+      state.rowsByTable = new Map(Object.entries(backupRows));
+      throw e;
+    }
   },
 
   renameTable({ oldName, newName }) {
@@ -1325,11 +1441,16 @@ const dm = {
     state.schemas = nextSchemas;
 
     const nextRows = new Map();
+    const nextEol = new Map();
     for (const [tableName, rows] of state.rowsByTable.entries()) {
       nextRows.set(tableName === from ? to : tableName, rows);
     }
+    for (const [tableName, eol] of state.csvEolByTable.entries()) {
+      nextEol.set(tableName === from ? to : tableName, eol);
+    }
     if (!nextRows.has(to)) nextRows.set(to, []);
     state.rowsByTable = nextRows;
+    state.csvEolByTable = nextEol;
 
     const oldCsv = path.join(state.workspacePath, `${from}.csv`);
     const newCsv = path.join(state.workspacePath, `${to}.csv`);
@@ -1362,6 +1483,7 @@ const dm = {
 
     state.schemas.delete(target);
     state.rowsByTable.delete(target);
+    state.csvEolByTable.delete(target);
     state.pendingChangeSets.clear();
 
     const csvPath = path.join(state.workspacePath, `${target}.csv`);
@@ -1373,6 +1495,8 @@ const dm = {
   generateChangelog() {
     ensureOpen();
     const out = writeGeneratedChangelog(state.changelogPath, state.schemas);
+    state.changelogFormat = "latest";
+    state.changelogMigrationNeeded = false;
     return { status: "generated", path: out };
   },
 

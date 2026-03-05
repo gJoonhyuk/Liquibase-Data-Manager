@@ -16,6 +16,9 @@ import { Button } from "./components/ui/button";
 export default function App() {
   const { theme, setTheme } = useTheme();
   const [validationJump, setValidationJump] = useState(null);
+  const [globalSaveBinding, setGlobalSaveBinding] = useState(null);
+  const [savingAll, setSavingAll] = useState(false);
+  const [saveProgress, setSaveProgress] = useState({ running: false, current: 0, total: 0, step: "", message: "" });
 
   const workspace = useWorkspaceState();
   const persistedTableNames = useMemo(() => (workspace.tables || []).map((t) => t.tableName), [workspace.tables]);
@@ -71,7 +74,7 @@ export default function App() {
       }
     }));
     workspace.setSelectedTable(name);
-    workspace.setMessage(`테이블 초안을 추가했습니다: ${name} (Save Table Info 필요)`);
+    workspace.setMessage(`테이블 초안을 추가했습니다: ${name} (Save All 필요)`);
     return true;
   };
 
@@ -108,6 +111,49 @@ export default function App() {
     }
   };
 
+  const onSaveAll = async () => {
+    if (savingAll) return;
+    try {
+      setSavingAll(true);
+      setSaveProgress({ running: true, current: 0, total: 4, step: "저장 준비", message: "collecting payload" });
+      const tables = schema.buildSchemaSavePayload();
+      const dataByTable = {};
+      let hasDataChanges = false;
+      if (globalSaveBinding?.hasDataUnsavedChanges && globalSaveBinding?.buildDataSavePayload) {
+        setSaveProgress({ running: true, current: 1, total: 4, step: "데이터 정리", message: "building data payload" });
+        const payload = globalSaveBinding.buildDataSavePayload();
+        if (payload?.table) {
+          dataByTable[payload.table] = payload.rows || [];
+          hasDataChanges = true;
+        }
+      }
+      setSaveProgress({ running: true, current: 2, total: 4, step: "전체 저장", message: "saving schema/data/changelog" });
+      const result = await api.saveAll({
+        tables,
+        dataByTable,
+        options: { forceChangelog: true }
+      });
+      setSaveProgress({ running: true, current: 3, total: 4, step: "메타 갱신", message: "refreshing view" });
+      await workspace.refreshMeta(workspace.selectedTable);
+      if (hasDataChanges && globalSaveBinding?.reloadCurrentTable) {
+        await globalSaveBinding.reloadCurrentTable();
+      }
+
+      const migrated = result?.migrated ? " / legacy->latest migrated" : "";
+      const chgPath = result?.path ? ` / changelog: ${result.path}` : "";
+      workspace.setMessage(`전체 저장 완료${migrated}${chgPath}`);
+      workspace.setError("");
+      setSaveProgress({ running: true, current: 4, total: 4, step: "완료", message: "completed" });
+    } catch (e) {
+      workspace.setError(e, "saveAll");
+    } finally {
+      setTimeout(() => {
+        setSavingAll(false);
+        setSaveProgress({ running: false, current: 0, total: 0, step: "", message: "" });
+      }, 150);
+    }
+  };
+
   const mainCols = `${layout.navCollapsed ? 0 : layout.navPanelWidth}px ${layout.navCollapsed ? 0 : 10}px minmax(0,1fr) 10px ${layout.rightCollapsed ? 0 : layout.rightPanelWidth}px`;
 
   return (
@@ -129,6 +175,7 @@ export default function App() {
             if (selected) workspace.setChangelogPath(selected);
           }}
           onOpenWorkspace={workspace.onOpenWorkspace}
+          onSaveAll={onSaveAll}
           onCancelOpenWorkspace={workspace.cancelOpenWorkspace}
           onValidate={sql.onValidate}
           message={workspace.message}
@@ -136,6 +183,7 @@ export default function App() {
           onErrorClick={() => workspace.setErrorDialogOpen(true)}
           workspaceOpened={workspace.workspaceOpened}
           openingWorkspace={workspace.openingWorkspace}
+          savingAll={savingAll}
           onClearMessage={() => workspace.setMessage("")}
           onClearError={() => workspace.setError("")}
           onOpenActionLog={() => workspace.setActionDialogOpen(true)}
@@ -179,6 +227,7 @@ export default function App() {
               workspaceReady={workspace.workspaceOpened}
               jumpToRowRequest={validationJump}
               onJumpToRowHandled={() => setValidationJump(null)}
+              onGlobalSaveBindingChange={setGlobalSaveBinding}
             />
             <HorizontalSplitter collapsed={layout.sqlCollapsed} onResizeStart={() => layout.setResizingSql(true)} onToggle={() => layout.setSqlCollapsed((v) => !v)} />
             {!layout.sqlCollapsed && (
@@ -266,6 +315,8 @@ export default function App() {
           onClearErrorLogs={() => workspace.setErrorLogs([])}
           openingWorkspace={workspace.openingWorkspace}
           openProgress={workspace.openProgress}
+          savingAll={savingAll}
+          saveProgress={saveProgress}
           onCancelOpenWorkspace={workspace.cancelOpenWorkspace}
         />
       </div>
