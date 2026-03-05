@@ -230,6 +230,22 @@ function writeCsvTable(csvPath, rows, headers, preferredEol = "") {
     });
     return rec;
   });
+
+  // If semantic content is unchanged, keep original file bytes as-is
+  // to avoid needless git diffs from EOL/formatting normalization.
+  if (fs.existsSync(csvPath)) {
+    try {
+      const prevText = fs.readFileSync(csvPath, "utf8");
+      const prevRecords = prevText.trim() ? parseCsv(prevText, { columns: true, skip_empty_lines: true }) : [];
+      const same =
+        prevRecords.length === records.length &&
+        prevRecords.every((r, i) => headers.every((h) => String(r?.[h] ?? "") === String(records[i]?.[h] ?? "")));
+      if (same) return;
+    } catch {
+      // fall back to rewrite path
+    }
+  }
+
   const csv = stringifyCsv(records, { header: true, columns: headers });
   writeTextFileIfChanged(csvPath, csv, preferredEol);
 }
@@ -625,6 +641,9 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
     writeTextFileIfChanged(tableFile, `${YAML.stringify(tableDoc).trimEnd()}\n`);
 
     const dataFile = path.join(dataDir, `${table.tableName}.yaml`);
+    const csvPath = path.join(state.workspacePath || "", `${table.tableName}.csv`);
+    let csvRelativePath = path.relative(path.dirname(dataFile), csvPath).replace(/\\/g, "/");
+    if (!csvRelativePath) csvRelativePath = `${table.tableName}.csv`;
     const dataDoc = {
       databaseChangeLog: [
         {
@@ -635,7 +654,7 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
               {
                 loadData: {
                   tableName: table.tableName,
-                  file: `../../../../${table.tableName}.csv`,
+                  file: csvRelativePath,
                   relativeToChangelogFile: true,
                   encoding: "UTF-8"
                 }
