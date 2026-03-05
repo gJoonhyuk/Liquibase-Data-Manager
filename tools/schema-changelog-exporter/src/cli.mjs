@@ -785,21 +785,46 @@ function writeGeneratedLayout(baseOutDir, tables, author) {
   }
 
   const masterDoc = {
-    databaseChangeLog: sorted.flatMap((t) => {
-      const entries = [
-        {
-          include: {
-            file: `tables/${t.tableName}.yaml`,
-            relativeToChangelogFile: true
-          }
-        },
-        {
-          include: {
-            file: `data/${t.tableName}.yaml`,
-            relativeToChangelogFile: true
-          }
+    databaseChangeLog: [
+      {
+        include: {
+          file: "tables.yaml",
+          relativeToChangelogFile: true
         }
-      ];
+      },
+      {
+        include: {
+          file: "data.yaml",
+          relativeToChangelogFile: true
+        }
+      },
+      {
+        include: {
+          file: "constraints.yaml",
+          relativeToChangelogFile: true
+        }
+      }
+    ]
+  };
+  const tablesDoc = {
+    databaseChangeLog: sorted.map((t) => ({
+      include: {
+        file: `tables/${t.tableName}.yaml`,
+        relativeToChangelogFile: true
+      }
+    }))
+  };
+  const dataDoc = {
+    databaseChangeLog: sorted.map((t) => ({
+      include: {
+        file: `data/${t.tableName}.yaml`,
+        relativeToChangelogFile: true
+      }
+    }))
+  };
+  const constraintsDoc = {
+    databaseChangeLog: sorted.flatMap((t) => {
+      const entries = [];
       if ((t.primaryKey || []).length || (t.indexes || []).length) {
         entries.push({
           include: {
@@ -819,6 +844,9 @@ function writeGeneratedLayout(baseOutDir, tables, author) {
       return entries;
     })
   };
+  writeYaml(path.join(outDir, "tables.yaml"), tablesDoc);
+  writeYaml(path.join(outDir, "data.yaml"), dataDoc);
+  writeYaml(path.join(outDir, "constraints.yaml"), constraintsDoc);
   writeYaml(path.join(outDir, "generated-master.yaml"), masterDoc);
   logInfo("Write master file: generated-master.yaml");
 }

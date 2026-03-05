@@ -681,21 +681,46 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
   }
 
   const masterDoc = {
-    databaseChangeLog: sortedTables.flatMap((t) => {
-      const includes = [
-        {
-          include: {
-            file: `tables/${t.tableName}.yaml`,
-            relativeToChangelogFile: true
-          }
-        },
-        {
-          include: {
-            file: `data/${t.tableName}.yaml`,
-            relativeToChangelogFile: true
-          }
+    databaseChangeLog: [
+      {
+        include: {
+          file: "tables.yaml",
+          relativeToChangelogFile: true
         }
-      ];
+      },
+      {
+        include: {
+          file: "data.yaml",
+          relativeToChangelogFile: true
+        }
+      },
+      {
+        include: {
+          file: "constraints.yaml",
+          relativeToChangelogFile: true
+        }
+      }
+    ]
+  };
+  const tablesDoc = {
+    databaseChangeLog: sortedTables.map((t) => ({
+      include: {
+        file: `tables/${t.tableName}.yaml`,
+        relativeToChangelogFile: true
+      }
+    }))
+  };
+  const dataDoc = {
+    databaseChangeLog: sortedTables.map((t) => ({
+      include: {
+        file: `data/${t.tableName}.yaml`,
+        relativeToChangelogFile: true
+      }
+    }))
+  };
+  const constraintsDoc = {
+    databaseChangeLog: sortedTables.flatMap((t) => {
+      const includes = [];
       if ((t.primaryKey || []).length || (t.indexes || []).length) {
         includes.push({
           include: {
@@ -715,6 +740,9 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
       return includes;
     })
   };
+  writeTextFileIfChanged(path.join(dir, "tables.yaml"), `${YAML.stringify(tablesDoc).trimEnd()}\n`);
+  writeTextFileIfChanged(path.join(dir, "data.yaml"), `${YAML.stringify(dataDoc).trimEnd()}\n`);
+  writeTextFileIfChanged(path.join(dir, "constraints.yaml"), `${YAML.stringify(constraintsDoc).trimEnd()}\n`);
   writeTextFileIfChanged(masterPath, `${YAML.stringify(masterDoc).trimEnd()}\n`);
   return masterPath;
 }
