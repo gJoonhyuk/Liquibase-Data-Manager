@@ -52,6 +52,48 @@ function clone(v) {
   return JSON.parse(JSON.stringify(v));
 }
 
+const ROUTINE_DB_TYPE_LABELS = ["Oracle", "MariaDB", "SqlServer", "PostgreSQL"];
+const ROUTINE_DB_TYPE_TO_DBMS = {
+  Oracle: "oracle",
+  MariaDB: "mariadb",
+  SqlServer: "mssql",
+  PostgreSQL: "postgresql"
+};
+const ROUTINE_DBMS_TO_DB_TYPE = {
+  oracle: "Oracle",
+  mariadb: "MariaDB",
+  mssql: "SqlServer",
+  sqlserver: "SqlServer",
+  postgresql: "PostgreSQL",
+  postgres: "PostgreSQL"
+};
+
+function normalizeRoutineDbType(dbType) {
+  const raw = String(dbType || "").trim();
+  if (!raw) return "Oracle";
+  if (ROUTINE_DB_TYPE_LABELS.includes(raw)) return raw;
+  const key = raw.toLowerCase();
+  return ROUTINE_DBMS_TO_DB_TYPE[key] || "Oracle";
+}
+
+function routineDbTypeFromDbms(dbms) {
+  const raw = String(dbms || "").trim();
+  if (!raw) return "Oracle";
+  const candidates = raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  for (const token of candidates) {
+    if (ROUTINE_DBMS_TO_DB_TYPE[token]) return ROUTINE_DBMS_TO_DB_TYPE[token];
+  }
+  return "Oracle";
+}
+
+function routineDbmsFromType(dbType) {
+  const normalized = normalizeRoutineDbType(dbType);
+  return ROUTINE_DB_TYPE_TO_DBMS[normalized] || "oracle";
+}
+
 function ensureOpen() {
   if (!state.workspacePath) throw new AppError("Workspace is not opened");
 }
@@ -390,6 +432,7 @@ function readWorkspaceObjects(changelogPath) {
         if (!name) continue;
         const routine = {
           name,
+          dbType: routineDbTypeFromDbms(changeSet?.dbms),
           sql,
           rollbackSql: extractRollbackSql(changeSet?.rollback || "")
         };
@@ -922,6 +965,7 @@ function writeGeneratedChangelog(masterChangelogPath, workspaceObjects) {
             changeSet: {
               id: `generated-${safe}-${type}-v1`,
               author: "data-manager",
+              dbms: routineDbmsFromType(routine.dbType),
               changes: [{ sql: { sql: String(routine.sql || "") } }],
               ...(String(routine.rollbackSql || "").trim()
                 ? { rollback: [{ sql: { sql: String(routine.rollbackSql || "") } }] }
@@ -1651,13 +1695,15 @@ const dm = {
     const backupFunctions = clone(Object.fromEntries(state.functions.entries()));
     const backupProcedures = clone(Object.fromEntries(state.procedures.entries()));
     const backupRows = clone(Object.fromEntries(state.rowsByTable.entries()));
-    const toMap = (input, fallbackName) => {
+    const toMap = (input, kind = "") => {
       const out = new Map();
       if (Array.isArray(input)) {
         for (const item of input) {
           const name = String(item?.name || "").trim();
           if (!name) continue;
-          out.set(name, { ...item, name });
+          const next = { ...item, name };
+          if (kind === "function" || kind === "procedure") next.dbType = normalizeRoutineDbType(item?.dbType);
+          out.set(name, next);
         }
         return out;
       }
@@ -1665,7 +1711,9 @@ const dm = {
         for (const [k, v] of Object.entries(input)) {
           const name = String(v?.name || k || "").trim();
           if (!name) continue;
-          out.set(name, { ...v, name });
+          const next = { ...v, name };
+          if (kind === "function" || kind === "procedure") next.dbType = normalizeRoutineDbType(v?.dbType);
+          out.set(name, next);
         }
       }
       return out;

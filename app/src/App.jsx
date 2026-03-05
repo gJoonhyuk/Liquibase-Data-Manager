@@ -16,6 +16,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Textarea } from "./components/ui/textarea";
 
+const ROUTINE_DB_TYPES = ["Oracle", "MariaDB", "SqlServer", "PostgreSQL"];
+
 export default function App() {
   const { theme, setTheme } = useTheme();
   const [validationJump, setValidationJump] = useState(null);
@@ -191,11 +193,11 @@ export default function App() {
   const addRoutine = (kind) => {
     const source = kind === "function" ? workspace.functions : workspace.procedures;
     const setter = kind === "function" ? workspace.setFunctions : workspace.setProcedures;
-    const base = kind === "function" ? "fn_new" : "sp_new";
+    const base = kind === "function" ? "FN_NEW" : "SP_NEW";
     let i = 1;
     while ((source || {})[`${base}_${i}`]) i += 1;
     const name = `${base}_${i}`;
-    setter((prev) => ({ ...prev, [name]: { name, sql: "", rollbackSql: "" } }));
+    setter((prev) => ({ ...prev, [name]: { name, dbType: "Oracle", sql: "", rollbackSql: "" } }));
     if (kind === "function") setSelectedFunction(name);
     else setSelectedProcedure(name);
   };
@@ -301,6 +303,15 @@ export default function App() {
                   if (isFn) setSelectedFunction(newName);
                   else setSelectedProcedure(newName);
                 }} placeholder="name" />
+                <select
+                  className="h-9 rounded-md border bg-background px-2 text-sm"
+                  value={routine.dbType || "Oracle"}
+                  onChange={(e) => updateRoutine(kind, selected, { dbType: e.target.value })}
+                >
+                  {ROUTINE_DB_TYPES.map((dbType) => (
+                    <option key={dbType} value={dbType}>{dbType}</option>
+                  ))}
+                </select>
                 <Textarea className="min-h-[220px] font-mono" value={routine.sql || ""} onChange={(e) => updateRoutine(kind, selected, { sql: e.target.value })} placeholder="SQL body" />
                 <Textarea className="min-h-[140px] font-mono" value={routine.rollbackSql || ""} onChange={(e) => updateRoutine(kind, selected, { rollbackSql: e.target.value })} placeholder="Rollback SQL (optional)" />
               </>
