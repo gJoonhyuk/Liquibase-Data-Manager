@@ -30,6 +30,9 @@ export function useWorkspaceState() {
   const [workspacePath, setWorkspacePath] = useState("");
   const [changelogPath, setChangelogPath] = useState("");
   const [tables, setTables] = useState([]);
+  const [sequences, setSequences] = useState({});
+  const [functions, setFunctions] = useState({});
+  const [procedures, setProcedures] = useState({});
   const [selectedTable, setSelectedTable] = useState("");
   const [schemaMap, setSchemaMap] = useState({});
   const [workspaceOpened, setWorkspaceOpened] = useState(false);
@@ -84,9 +87,12 @@ export function useWorkspaceState() {
   }, [changelogPath]);
 
   const refreshMeta = async (nextSelected = "") => {
-    const [tableList, schema] = await Promise.all([api.listTables(), api.getSchema()]);
+    const [tableList, schema, objects] = await Promise.all([api.listTables(), api.getSchema(), api.getWorkspaceObjects().catch(() => ({}))]);
     setTables(tableList);
     setSchemaMap(schema);
+    setSequences(objects?.sequences || {});
+    setFunctions(objects?.functions || {});
+    setProcedures(objects?.procedures || {});
     const available = new Set(Object.keys(schema || {}));
     let target = nextSelected || selectedTable || tableList[0]?.tableName || "";
     if (!available.has(target)) target = tableList[0]?.tableName || Object.keys(schema || {})[0] || "";
@@ -163,6 +169,12 @@ export function useWorkspaceState() {
     setChangelogPath,
     tables,
     setTables,
+    sequences,
+    setSequences,
+    functions,
+    setFunctions,
+    procedures,
+    setProcedures,
     workspaceOpened,
     openingWorkspace,
     openProgress,

@@ -31,6 +31,7 @@ export const api = {
   previewDeleteRows: (payload) => bridge ? bridge.previewDeleteRows(payload) : call("/changes/preview-delete-rows", { method: "POST", body: JSON.stringify(payload) }),
   applyChange: (payload) => bridge ? bridge.applyChange(payload) : call("/changes/apply", { method: "POST", body: JSON.stringify(payload) }),
   getSchema: () => bridge ? bridge.getSchema() : call("/schema"),
+  getWorkspaceObjects: () => bridge ? bridge.getWorkspaceObjects() : call("/workspace/objects"),
   getChangelogFormatStatus: () => bridge ? bridge.getChangelogFormatStatus() : Promise.resolve({ format: "unknown", migrationNeeded: false }),
   updateSchema: (tables) => bridge ? bridge.updateSchema(tables) : call("/schema", { method: "PUT", body: JSON.stringify({ tables }) }),
   saveAll: (payload) => bridge ? bridge.saveAll(payload) : call("/schema/save-all", { method: "POST", body: JSON.stringify(payload) }),

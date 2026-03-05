@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld("dmApi", {
   previewDeleteRows: (payload) => call("dm:changes:previewDeleteRows", payload),
   applyChange: (payload) => call("dm:changes:apply", payload),
   getSchema: () => call("dm:schema:get"),
+  getWorkspaceObjects: () => call("dm:workspace:objects"),
   getChangelogFormatStatus: () => call("dm:schema:formatStatus"),
   updateSchema: (tables) => call("dm:schema:update", { tables }),
   saveAll: (payload) => call("dm:schema:saveAll", payload),

@@ -91,6 +91,7 @@ app.whenReady().then(() => {
   handle("dm:changes:previewDeleteRows", (p) => dm.previewDeleteRows(p || {}));
   handle("dm:changes:apply", (p) => dm.applyChange(p || {}));
   handle("dm:schema:get", () => dm.getSchema());
+  handle("dm:workspace:objects", () => dm.getWorkspaceObjects());
   handle("dm:schema:formatStatus", () => dm.getChangelogFormatStatus());
   handle("dm:schema:update", (p) => dm.updateSchema(p?.tables || []));
   handle("dm:schema:saveAll", (p) => dm.saveAll(p || {}));

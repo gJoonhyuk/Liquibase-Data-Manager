@@ -22,6 +22,9 @@ const state = {
   changelogFormat: "unknown",
   changelogMigrationNeeded: false,
   schemas: new Map(),
+  sequences: new Map(),
+  functions: new Map(),
+  procedures: new Map(),
   rowsByTable: new Map(),
   csvEolByTable: new Map(),
   pendingChangeSets: new Map(),
@@ -290,7 +293,7 @@ function collectChangeEntries(changelogPath, visited = new Set(), stack = new Se
   const out = [];
 
   for (const entry of dbChangeLog) {
-    if (entry?.changeSet) out.push(entry);
+    if (entry?.changeSet) out.push({ ...entry, __sourcePath: resolved });
 
     const includeFile = entry?.include?.file;
     if (includeFile) {
@@ -314,6 +317,122 @@ function collectChangeEntries(changelogPath, visited = new Set(), stack = new Se
 
   stack.delete(resolved);
   return out;
+}
+
+function fileBaseNameNoExt(p) {
+  return path.basename(String(p || ""), path.extname(String(p || "")));
+}
+
+function readWorkspaceObjects(changelogPath) {
+  const dbChangeLog = collectChangeEntries(changelogPath);
+  const tables = readSchema(changelogPath);
+  const sequences = new Map();
+  const functions = new Map();
+  const procedures = new Map();
+
+  const extractSql = (sqlDetail) => {
+    if (typeof sqlDetail === "string") return sqlDetail;
+    if (sqlDetail && typeof sqlDetail.sql === "string") return sqlDetail.sql;
+    return "";
+  };
+
+  const extractRollbackSql = (rollback) => {
+    if (!rollback) return "";
+    if (typeof rollback === "string") return rollback;
+    if (Array.isArray(rollback)) {
+      for (const r of rollback) {
+        const type = Object.keys(r || {})[0];
+        if (type === "sql") {
+          const sql = extractSql(r[type]);
+          if (sql) return sql;
+        }
+      }
+      return "";
+    }
+    if (typeof rollback === "object") {
+      if (rollback.sql) return extractSql(rollback.sql);
+      return "";
+    }
+    return "";
+  };
+
+  for (const csEntry of dbChangeLog) {
+    const sourcePath = String(csEntry?.__sourcePath || "").replace(/\\/g, "/").toLowerCase();
+    const changeSet = csEntry?.changeSet;
+    const changes = Array.isArray(changeSet?.changes) ? changeSet.changes : [];
+    for (const change of changes) {
+      const type = Object.keys(change || {})[0];
+      const detail = change?.[type] || {};
+
+      if (type === "createSequence") {
+        const name = String(detail.sequenceName || detail.name || "").trim();
+        if (!name) continue;
+        sequences.set(name, {
+          name,
+          ...(detail.startValue != null ? { startValue: String(detail.startValue) } : {}),
+          ...(detail.incrementBy != null ? { incrementBy: String(detail.incrementBy) } : {}),
+          ...(detail.minValue != null ? { minValue: String(detail.minValue) } : {}),
+          ...(detail.maxValue != null ? { maxValue: String(detail.maxValue) } : {}),
+          ...(detail.cacheSize != null ? { cacheSize: String(detail.cacheSize) } : {}),
+          ...(detail.cycle != null ? { cycle: detail.cycle === true } : {})
+        });
+      }
+
+      if (type === "sql") {
+        const sql = extractSql(detail);
+        if (!sql) continue;
+        const csId = String(changeSet?.id || "").toLowerCase();
+        const fromSource = sourcePath.includes("/functions/") ? "function" : sourcePath.includes("/procedures/") ? "procedure" : "";
+        const fromId = csId.includes("-function-") ? "function" : csId.includes("-procedure-") ? "procedure" : "";
+        const kind = fromSource || fromId;
+        if (!kind) continue;
+        const name = fileBaseNameNoExt(sourcePath) || String(changeSet?.id || "").trim();
+        if (!name) continue;
+        const routine = {
+          name,
+          sql,
+          rollbackSql: extractRollbackSql(changeSet?.rollback || "")
+        };
+        if (kind === "function") functions.set(name, routine);
+        else procedures.set(name, routine);
+      }
+    }
+  }
+
+  return { tables, sequences, functions, procedures };
+}
+
+function readWorkspaceObjectsFromChangelogDir(changelogDir) {
+  const tables = readSchemaFromChangelogDir(changelogDir);
+  const sequences = new Map();
+  const functions = new Map();
+  const procedures = new Map();
+
+  if (!fs.existsSync(changelogDir) || !fs.statSync(changelogDir).isDirectory()) {
+    return { tables, sequences, functions, procedures };
+  }
+  const files = [];
+  const walk = (dir) => {
+    for (const name of fs.readdirSync(dir)) {
+      const p = path.join(dir, name);
+      const st = fs.statSync(p);
+      if (st.isDirectory()) walk(p);
+      else if (/\.ya?ml$/i.test(name)) files.push(p);
+    }
+  };
+  walk(changelogDir);
+  files.sort((a, b) => a.localeCompare(b));
+  for (const file of files) {
+    try {
+      const parsed = readWorkspaceObjects(file);
+      for (const [k, v] of parsed.sequences.entries()) sequences.set(k, v);
+      for (const [k, v] of parsed.functions.entries()) functions.set(k, v);
+      for (const [k, v] of parsed.procedures.entries()) procedures.set(k, v);
+    } catch {
+      // ignore fallback parse errors
+    }
+  }
+  return { tables, sequences, functions, procedures };
 }
 
 function readSchema(changelogPath) {
@@ -554,7 +673,11 @@ function detectChangelogFormat(changelogPath) {
   }
 }
 
-function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
+function writeGeneratedChangelog(masterChangelogPath, workspaceObjects) {
+  const schemaMap = workspaceObjects?.tables instanceof Map ? workspaceObjects.tables : workspaceObjects;
+  const sequenceMap = workspaceObjects?.sequences instanceof Map ? workspaceObjects.sequences : new Map();
+  const functionMap = workspaceObjects?.functions instanceof Map ? workspaceObjects.functions : new Map();
+  const procedureMap = workspaceObjects?.procedures instanceof Map ? workspaceObjects.procedures : new Map();
   const requestedPath = path.resolve(masterChangelogPath);
   const requestedDir = path.dirname(requestedPath);
   const requestedBase = path.basename(requestedPath).toLowerCase();
@@ -574,10 +697,16 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
   const dataDir = path.join(dir, "data");
   const constraintsDir = path.join(dir, "constraints");
   const fksDir = path.join(dir, "fks");
+  const sequencesDir = path.join(dir, "sequences");
+  const functionsDir = path.join(dir, "functions");
+  const proceduresDir = path.join(dir, "procedures");
   fs.mkdirSync(tablesDir, { recursive: true });
   fs.mkdirSync(dataDir, { recursive: true });
   fs.mkdirSync(constraintsDir, { recursive: true });
   fs.mkdirSync(fksDir, { recursive: true });
+  fs.mkdirSync(sequencesDir, { recursive: true });
+  fs.mkdirSync(functionsDir, { recursive: true });
+  fs.mkdirSync(proceduresDir, { recursive: true });
 
   for (const file of fs.readdirSync(dir)) {
     if (/^generated-\d{14}\.ya?ml$/i.test(file)) {
@@ -748,6 +877,83 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
     if (!expectedFkFiles.has(file)) fs.rmSync(path.join(fksDir, file), { force: true });
   }
 
+  const toSafeFileName = (name) => String(name || "").replace(/[\\/:*?"<>|]/g, "_");
+  const sortedSequences = Array.from(sequenceMap.values()).sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  for (const seq of sortedSequences) {
+    const seqFile = path.join(sequencesDir, `${toSafeFileName(seq.name)}.yaml`);
+    const seqDoc = {
+      databaseChangeLog: [
+        {
+          changeSet: {
+            id: `generated-${toSafeFileName(seq.name)}-sequence-v1`,
+            author: "data-manager",
+            changes: [
+              {
+                createSequence: {
+                  sequenceName: seq.name,
+                  ...(seq.startValue ? { startValue: seq.startValue } : {}),
+                  ...(seq.incrementBy ? { incrementBy: seq.incrementBy } : {}),
+                  ...(seq.minValue ? { minValue: seq.minValue } : {}),
+                  ...(seq.maxValue ? { maxValue: seq.maxValue } : {}),
+                  ...(seq.cacheSize ? { cacheSize: seq.cacheSize } : {}),
+                  ...(seq.cycle === true ? { cycle: true } : {})
+                }
+              }
+            ]
+          }
+        }
+      ]
+    };
+    writeTextFileIfChanged(seqFile, `${YAML.stringify(seqDoc).trimEnd()}\n`);
+  }
+  const expectedSequenceFiles = new Set(sortedSequences.map((s) => `${toSafeFileName(s.name)}.yaml`));
+  for (const file of fs.readdirSync(sequencesDir)) {
+    if (!/\.ya?ml$/i.test(file)) continue;
+    if (!expectedSequenceFiles.has(file)) fs.rmSync(path.join(sequencesDir, file), { force: true });
+  }
+
+  const buildRoutineDoc = (routine, type) => {
+    const safe = toSafeFileName(routine.name);
+    return {
+      file: `${safe}.yaml`,
+      doc: {
+        databaseChangeLog: [
+          {
+            changeSet: {
+              id: `generated-${safe}-${type}-v1`,
+              author: "data-manager",
+              changes: [{ sql: { sql: String(routine.sql || "") } }],
+              ...(String(routine.rollbackSql || "").trim()
+                ? { rollback: [{ sql: { sql: String(routine.rollbackSql || "") } }] }
+                : {})
+            }
+          }
+        ]
+      }
+    };
+  };
+  const sortedFunctions = Array.from(functionMap.values()).sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  for (const fn of sortedFunctions) {
+    const r = buildRoutineDoc(fn, "function");
+    writeTextFileIfChanged(path.join(functionsDir, r.file), `${YAML.stringify(r.doc).trimEnd()}\n`);
+  }
+  const expectedFunctionFiles = new Set(sortedFunctions.map((f) => `${toSafeFileName(f.name)}.yaml`));
+  for (const file of fs.readdirSync(functionsDir)) {
+    if (!/\.ya?ml$/i.test(file)) continue;
+    if (!expectedFunctionFiles.has(file)) fs.rmSync(path.join(functionsDir, file), { force: true });
+  }
+
+  const sortedProcedures = Array.from(procedureMap.values()).sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  for (const sp of sortedProcedures) {
+    const r = buildRoutineDoc(sp, "procedure");
+    writeTextFileIfChanged(path.join(proceduresDir, r.file), `${YAML.stringify(r.doc).trimEnd()}\n`);
+  }
+  const expectedProcedureFiles = new Set(sortedProcedures.map((p) => `${toSafeFileName(p.name)}.yaml`));
+  for (const file of fs.readdirSync(proceduresDir)) {
+    if (!/\.ya?ml$/i.test(file)) continue;
+    if (!expectedProcedureFiles.has(file)) fs.rmSync(path.join(proceduresDir, file), { force: true });
+  }
+
   const masterDoc = {
     databaseChangeLog: [
       {
@@ -765,6 +971,24 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
       {
         include: {
           file: "constraints.yaml",
+          relativeToChangelogFile: true
+        }
+      },
+      {
+        include: {
+          file: "sequences.yaml",
+          relativeToChangelogFile: true
+        }
+      },
+      {
+        include: {
+          file: "functions.yaml",
+          relativeToChangelogFile: true
+        }
+      },
+      {
+        include: {
+          file: "procedures.yaml",
           relativeToChangelogFile: true
         }
       }
@@ -808,9 +1032,36 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
       return includes;
     })
   };
+  const sequencesDoc = {
+    databaseChangeLog: sortedSequences.map((s) => ({
+      include: {
+        file: `sequences/${toSafeFileName(s.name)}.yaml`,
+        relativeToChangelogFile: true
+      }
+    }))
+  };
+  const functionsDoc = {
+    databaseChangeLog: sortedFunctions.map((f) => ({
+      include: {
+        file: `functions/${toSafeFileName(f.name)}.yaml`,
+        relativeToChangelogFile: true
+      }
+    }))
+  };
+  const proceduresDoc = {
+    databaseChangeLog: sortedProcedures.map((p) => ({
+      include: {
+        file: `procedures/${toSafeFileName(p.name)}.yaml`,
+        relativeToChangelogFile: true
+      }
+    }))
+  };
   writeTextFileIfChanged(path.join(dir, "tables.yaml"), `${YAML.stringify(tablesDoc).trimEnd()}\n`);
   writeTextFileIfChanged(path.join(dir, "data.yaml"), `${YAML.stringify(dataDoc).trimEnd()}\n`);
   writeTextFileIfChanged(path.join(dir, "constraints.yaml"), `${YAML.stringify(constraintsDoc).trimEnd()}\n`);
+  writeTextFileIfChanged(path.join(dir, "sequences.yaml"), `${YAML.stringify(sequencesDoc).trimEnd()}\n`);
+  writeTextFileIfChanged(path.join(dir, "functions.yaml"), `${YAML.stringify(functionsDoc).trimEnd()}\n`);
+  writeTextFileIfChanged(path.join(dir, "procedures.yaml"), `${YAML.stringify(proceduresDoc).trimEnd()}\n`);
   writeTextFileIfChanged(masterPath, `${YAML.stringify(masterDoc).trimEnd()}\n`);
   return masterPath;
 }
@@ -1164,14 +1415,14 @@ const dm = {
       // 3) Load schema metadata
       advanceFixedStep("스키마 로딩", 0, 1, "parsing changelog");
       await yieldToEventLoop();
-      let schemas = readSchema(effectiveChangelog);
-      if (!schemas.size) {
+      let loaded = readWorkspaceObjects(effectiveChangelog);
+      if (!loaded.tables.size && !loaded.sequences.size && !loaded.functions.size && !loaded.procedures.size) {
         advanceFixedStep("스키마 로딩", 0, 1, "fallback scan changelog dir");
         await yieldToEventLoop();
         const changelogDir = path.dirname(effectiveChangelog);
-        schemas = readSchemaFromChangelogDir(changelogDir);
+        loaded = readWorkspaceObjectsFromChangelogDir(changelogDir);
       }
-      advanceFixedStep("스키마 로딩", 1, 1, `tables=${schemas.size}`);
+      advanceFixedStep("스키마 로딩", 1, 1, `tables=${loaded.tables.size}`);
       await yieldToEventLoop();
       ensureNotCanceled();
 
@@ -1181,11 +1432,17 @@ const dm = {
       state.changelogFormat = format.format;
       state.changelogMigrationNeeded = !!format.migrationNeeded;
       state.schemas = new Map();
+      state.sequences = new Map();
+      state.functions = new Map();
+      state.procedures = new Map();
       state.rowsByTable = new Map();
       state.csvEolByTable = new Map();
       state.pendingChangeSets = new Map();
+      for (const [name, obj] of loaded.sequences.entries()) state.sequences.set(name, obj);
+      for (const [name, obj] of loaded.functions.entries()) state.functions.set(name, obj);
+      for (const [name, obj] of loaded.procedures.entries()) state.procedures.set(name, obj);
 
-      if (!schemas.size) {
+      if (!loaded.tables.size && !loaded.sequences.size && !loaded.functions.size && !loaded.procedures.size) {
         const csvFiles = fs.readdirSync(state.workspacePath).filter((f) => f.endsWith(".csv"));
         const totalUnits = 3 + csvFiles.length * 100 + 1; // fixed steps + each file(0~100) + finalize
         updateOpenJob({ step: "CSV 전용 워크스페이스 로딩", current: 3, total: totalUnits, message: "loading csv files" });
@@ -1220,11 +1477,11 @@ const dm = {
         return { status: "ok" };
       }
 
-      const totalUnits = 3 + schemas.size * 100 + 1; // fixed steps + each table(0~100) + finalize
-      updateOpenJob({ step: "테이블 데이터 로딩", current: 3, total: totalUnits, message: `tables=${schemas.size}` });
+      const totalUnits = 3 + loaded.tables.size * 100 + 1; // fixed steps + each table(0~100) + finalize
+      updateOpenJob({ step: "테이블 데이터 로딩", current: 3, total: totalUnits, message: `tables=${loaded.tables.size}` });
       await yieldToEventLoop();
       let tableIdx = 0;
-      for (const [tableName, schema] of schemas.entries()) {
+      for (const [tableName, schema] of loaded.tables.entries()) {
         ensureNotCanceled();
         const base = 3 + tableIdx * 100;
         state.schemas.set(tableName, schema);
@@ -1363,6 +1620,16 @@ const dm = {
     return Object.fromEntries(Array.from(state.schemas.entries()));
   },
 
+  getWorkspaceObjects() {
+    ensureOpen();
+    return {
+      tables: Object.fromEntries(Array.from(state.schemas.entries())),
+      sequences: Object.fromEntries(Array.from(state.sequences.entries())),
+      functions: Object.fromEntries(Array.from(state.functions.entries())),
+      procedures: Object.fromEntries(Array.from(state.procedures.entries()))
+    };
+  },
+
   updateSchema(tables) {
     ensureOpen();
     setSchemasFromTables(tables);
@@ -1377,14 +1644,39 @@ const dm = {
     };
   },
 
-  saveAll({ tables, dataByTable, options } = {}) {
+  saveAll({ tables, dataByTable, sequences, functions, procedures, options } = {}) {
     ensureOpen();
     const backupSchemas = clone(Object.fromEntries(state.schemas.entries()));
+    const backupSequences = clone(Object.fromEntries(state.sequences.entries()));
+    const backupFunctions = clone(Object.fromEntries(state.functions.entries()));
+    const backupProcedures = clone(Object.fromEntries(state.procedures.entries()));
     const backupRows = clone(Object.fromEntries(state.rowsByTable.entries()));
+    const toMap = (input, fallbackName) => {
+      const out = new Map();
+      if (Array.isArray(input)) {
+        for (const item of input) {
+          const name = String(item?.name || "").trim();
+          if (!name) continue;
+          out.set(name, { ...item, name });
+        }
+        return out;
+      }
+      if (input && typeof input === "object") {
+        for (const [k, v] of Object.entries(input)) {
+          const name = String(v?.name || k || "").trim();
+          if (!name) continue;
+          out.set(name, { ...v, name });
+        }
+      }
+      return out;
+    };
     try {
       if (Array.isArray(tables) && tables.length) {
         setSchemasFromTables(tables);
       }
+      if (sequences != null) state.sequences = toMap(sequences, "sequence");
+      if (functions != null) state.functions = toMap(functions, "function");
+      if (procedures != null) state.procedures = toMap(procedures, "procedure");
 
       const updates = dataByTable && typeof dataByTable === "object" ? dataByTable : {};
       for (const [tableName, rows] of Object.entries(updates)) {
@@ -1409,7 +1701,12 @@ const dm = {
       let migrated = false;
       let outPath = "";
       if (forceChangelog || state.changelogMigrationNeeded) {
-        outPath = writeGeneratedChangelog(state.changelogPath, state.schemas);
+        outPath = writeGeneratedChangelog(state.changelogPath, {
+          tables: state.schemas,
+          sequences: state.sequences,
+          functions: state.functions,
+          procedures: state.procedures
+        });
         changelogSaved = true;
         migrated = !!state.changelogMigrationNeeded;
         state.changelogFormat = "latest";
@@ -1418,6 +1715,9 @@ const dm = {
       return { status: "saved", changelogSaved, migrated, path: outPath };
     } catch (e) {
       state.schemas = new Map(Object.entries(backupSchemas));
+      state.sequences = new Map(Object.entries(backupSequences));
+      state.functions = new Map(Object.entries(backupFunctions));
+      state.procedures = new Map(Object.entries(backupProcedures));
       state.rowsByTable = new Map(Object.entries(backupRows));
       throw e;
     }
@@ -1513,7 +1813,12 @@ const dm = {
 
   generateChangelog() {
     ensureOpen();
-    const out = writeGeneratedChangelog(state.changelogPath, state.schemas);
+    const out = writeGeneratedChangelog(state.changelogPath, {
+      tables: state.schemas,
+      sequences: state.sequences,
+      functions: state.functions,
+      procedures: state.procedures
+    });
     state.changelogFormat = "latest";
     state.changelogMigrationNeeded = false;
     return { status: "generated", path: out };
