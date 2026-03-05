@@ -294,6 +294,7 @@ function collectChangeEntries(changelogPath, visited = new Set(), stack = new Se
 function readSchema(changelogPath) {
   const dbChangeLog = collectChangeEntries(changelogPath);
   const builders = new Map();
+  const seenFkSignaturesByTable = new Map();
 
   const ensureBuilder = (tableName) => {
     if (!builders.has(tableName)) {
@@ -307,6 +308,11 @@ function readSchema(changelogPath) {
       });
     }
     return builders.get(tableName);
+  };
+
+  const ensureSeenFkSet = (tableName) => {
+    if (!seenFkSignaturesByTable.has(tableName)) seenFkSignaturesByTable.set(tableName, new Set());
+    return seenFkSignaturesByTable.get(tableName);
   };
 
   for (const csEntry of dbChangeLog) {
@@ -345,13 +351,24 @@ function readSchema(changelogPath) {
       if (type === "addForeignKeyConstraint") {
         const baseTable = String(detail.baseTableName || "");
         const b = ensureBuilder(baseTable);
-        b.foreignKeys.push({
+        const fk = {
           name: String(detail.constraintName || ""),
           childTable: baseTable,
           childColumns: splitColumns(detail.baseColumnNames),
           parentTable: String(detail.referencedTableName || ""),
           parentColumns: splitColumns(detail.referencedColumnNames)
-        });
+        };
+        const signature = JSON.stringify([
+          fk.name,
+          fk.childTable,
+          fk.parentTable,
+          fk.childColumns,
+          fk.parentColumns
+        ]);
+        const seen = ensureSeenFkSet(baseTable);
+        if (seen.has(signature)) continue;
+        seen.add(signature);
+        b.foreignKeys.push(fk);
       }
 
       if (type === "createIndex") {
@@ -397,7 +414,25 @@ function readSchemaFromChangelogDir(changelogDir) {
     try {
       const parsed = readSchema(file);
       for (const [tableName, schema] of parsed.entries()) {
-        merged.set(tableName, schema);
+        const prev = merged.get(tableName);
+        if (!prev) {
+          merged.set(tableName, schema);
+          continue;
+        }
+
+        const next = clone(prev);
+        if ((schema.columns || []).length) next.columns = schema.columns;
+        if ((schema.primaryKey || []).length) next.primaryKey = schema.primaryKey;
+        if (schema.primaryKeyName) next.primaryKeyName = schema.primaryKeyName;
+        if ((schema.indexes || []).length) next.indexes = schema.indexes;
+        for (const fk of schema.foreignKeys || []) {
+          const signature = JSON.stringify([fk.name, fk.childTable, fk.parentTable, fk.childColumns || [], fk.parentColumns || []]);
+          const exists = (next.foreignKeys || []).some(
+            (x) => JSON.stringify([x.name, x.childTable, x.parentTable, x.childColumns || [], x.parentColumns || []]) === signature
+          );
+          if (!exists) next.foreignKeys = [...(next.foreignKeys || []), fk];
+        }
+        merged.set(tableName, next);
       }
     } catch {
       // ignore broken or unrelated changelog fragments during fallback scan
@@ -463,12 +498,14 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
   // If user selected a table fragment (for example: .../tables/FOO.yaml),
   // normalize output to its parent changelog dir and write master as generated-master.yaml.
   const looksLikeMaster = /master/.test(requestedBase);
-  const baseDir = requestedDirBase === "tables" ? path.dirname(requestedDir) : requestedDir;
+  const baseDir = requestedDirBase === "tables" || requestedDirBase === "fks" ? path.dirname(requestedDir) : requestedDir;
   const masterPath = looksLikeMaster ? requestedPath : path.join(baseDir, "generated-master.yaml");
   const dir = path.dirname(masterPath);
   fs.mkdirSync(dir, { recursive: true });
   const tablesDir = path.join(dir, "tables");
+  const fksDir = path.join(dir, "fks");
   fs.mkdirSync(tablesDir, { recursive: true });
+  fs.mkdirSync(fksDir, { recursive: true });
 
   for (const file of fs.readdirSync(dir)) {
     if (/^generated-\d{14}\.ya?ml$/i.test(file)) {
@@ -481,8 +518,8 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
   );
 
   for (const table of sortedTables) {
-    const changes = [];
-    changes.push({
+    const tableChanges = [];
+    tableChanges.push({
       createTable: {
         tableName: table.tableName,
         columns: (table.columns || []).map((c) => ({
@@ -496,7 +533,7 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
       }
     });
     if ((table.primaryKey || []).length) {
-      changes.push({
+      tableChanges.push({
         addPrimaryKey: {
           tableName: table.tableName,
           columnNames: table.primaryKey.join(","),
@@ -504,19 +541,8 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
         }
       });
     }
-    for (const fk of table.foreignKeys || []) {
-      changes.push({
-        addForeignKeyConstraint: {
-          constraintName: fk.name,
-          baseTableName: fk.childTable,
-          baseColumnNames: (fk.childColumns || []).join(","),
-          referencedTableName: fk.parentTable,
-          referencedColumnNames: (fk.parentColumns || []).join(",")
-        }
-      });
-    }
     for (const index of table.indexes || []) {
-      changes.push({
+      tableChanges.push({
         createIndex: {
           tableName: table.tableName,
           indexName: index.name,
@@ -533,28 +559,81 @@ function writeGeneratedChangelog(masterChangelogPath, schemaMap) {
           changeSet: {
             id: `generated-${table.tableName}-v1`,
             author: "data-manager",
-            changes
+            changes: tableChanges
           }
         }
       ]
     };
     writeTextFileIfChanged(tableFile, `${YAML.stringify(tableDoc).trimEnd()}\n`);
+
+    const fkChanges = [];
+    for (const fk of table.foreignKeys || []) {
+      fkChanges.push({
+        addForeignKeyConstraint: {
+          constraintName: fk.name,
+          baseTableName: fk.childTable,
+          baseColumnNames: (fk.childColumns || []).join(","),
+          referencedTableName: fk.parentTable,
+          referencedColumnNames: (fk.parentColumns || []).join(",")
+        }
+      });
+    }
+    const fkFile = path.join(fksDir, `${table.tableName}.yaml`);
+    if (fkChanges.length) {
+      const fkDoc = {
+        databaseChangeLog: [
+          {
+            changeSet: {
+              id: `generated-${table.tableName}-fk-v1`,
+              author: "data-manager",
+              changes: fkChanges
+            }
+          }
+        ]
+      };
+      writeTextFileIfChanged(fkFile, `${YAML.stringify(fkDoc).trimEnd()}\n`);
+    } else if (fs.existsSync(fkFile)) {
+      fs.rmSync(fkFile, { force: true });
+    }
   }
 
   // Keep only currently managed table changelog files.
-  const expected = new Set(sortedTables.map((t) => `${t.tableName}.yaml`));
+  const expectedTableFiles = new Set(sortedTables.map((t) => `${t.tableName}.yaml`));
   for (const file of fs.readdirSync(tablesDir)) {
     if (!/\.ya?ml$/i.test(file)) continue;
-    if (!expected.has(file)) fs.rmSync(path.join(tablesDir, file), { force: true });
+    if (!expectedTableFiles.has(file)) fs.rmSync(path.join(tablesDir, file), { force: true });
+  }
+
+  const expectedFkFiles = new Set(
+    sortedTables
+      .filter((t) => (t.foreignKeys || []).length > 0)
+      .map((t) => `${t.tableName}.yaml`)
+  );
+  for (const file of fs.readdirSync(fksDir)) {
+    if (!/\.ya?ml$/i.test(file)) continue;
+    if (!expectedFkFiles.has(file)) fs.rmSync(path.join(fksDir, file), { force: true });
   }
 
   const masterDoc = {
-    databaseChangeLog: sortedTables.map((t) => ({
-      include: {
-        file: `tables/${t.tableName}.yaml`,
-        relativeToChangelogFile: true
+    databaseChangeLog: sortedTables.flatMap((t) => {
+      const includes = [
+        {
+          include: {
+            file: `tables/${t.tableName}.yaml`,
+            relativeToChangelogFile: true
+          }
+        }
+      ];
+      if ((t.foreignKeys || []).length) {
+        includes.push({
+          include: {
+            file: `fks/${t.tableName}.yaml`,
+            relativeToChangelogFile: true
+          }
+        });
       }
-    }))
+      return includes;
+    })
   };
   writeTextFileIfChanged(masterPath, `${YAML.stringify(masterDoc).trimEnd()}\n`);
   return masterPath;

@@ -603,18 +603,6 @@ function tableToYaml(table, author) {
     });
   }
 
-  for (const fk of table.foreignKeys || []) {
-    changes.push({
-      addForeignKeyConstraint: {
-        constraintName: fk.name,
-        baseTableName: fk.childTable,
-        baseColumnNames: (fk.childColumns || []).join(","),
-        referencedTableName: fk.parentTable,
-        referencedColumnNames: (fk.parentColumns || []).join(",")
-      }
-    });
-  }
-
   for (const idx of table.indexes || []) {
     changes.push({
       createIndex: {
@@ -639,10 +627,37 @@ function tableToYaml(table, author) {
   };
 }
 
+function fkToYaml(table, author) {
+  const changes = (table.foreignKeys || []).map((fk) => ({
+    addForeignKeyConstraint: {
+      constraintName: fk.name,
+      baseTableName: fk.childTable,
+      baseColumnNames: (fk.childColumns || []).join(","),
+      referencedTableName: fk.parentTable,
+      referencedColumnNames: (fk.parentColumns || []).join(",")
+    }
+  }));
+
+  if (!changes.length) return null;
+  return {
+    databaseChangeLog: [
+      {
+        changeSet: {
+          id: `generated-${table.tableName}-fk-v1`,
+          author,
+          changes
+        }
+      }
+    ]
+  };
+}
+
 function writeGeneratedLayout(baseOutDir, tables, author) {
   const outDir = path.resolve(baseOutDir);
   const tablesDir = path.join(outDir, "tables");
+  const fksDir = path.join(outDir, "fks");
   ensureDir(tablesDir);
+  ensureDir(fksDir);
   logInfo(`Writing changelog files to: ${outDir}`);
 
   const sorted = [...tables].sort((a, b) => String(a.tableName).localeCompare(String(b.tableName)));
@@ -651,15 +666,53 @@ function writeGeneratedLayout(baseOutDir, tables, author) {
     const filePath = path.join(tablesDir, `${table.tableName}.yaml`);
     writeYaml(filePath, tableToYaml(table, author));
     logInfo(`Write table file [${i + 1}/${sorted.length}]: ${filePath}`);
+
+    const fkPath = path.join(fksDir, `${table.tableName}.yaml`);
+    const fkDoc = fkToYaml(table, author);
+    if (fkDoc) {
+      writeYaml(fkPath, fkDoc);
+      logInfo(`Write fk file    [${i + 1}/${sorted.length}]: ${fkPath}`);
+    } else if (fs.existsSync(fkPath)) {
+      fs.rmSync(fkPath, { force: true });
+    }
+  }
+
+  const expectedTableFiles = new Set(sorted.map((t) => `${t.tableName}.yaml`));
+  for (const file of fs.readdirSync(tablesDir)) {
+    if (!/\.ya?ml$/i.test(file)) continue;
+    if (!expectedTableFiles.has(file)) fs.rmSync(path.join(tablesDir, file), { force: true });
+  }
+
+  const expectedFkFiles = new Set(
+    sorted
+      .filter((t) => (t.foreignKeys || []).length > 0)
+      .map((t) => `${t.tableName}.yaml`)
+  );
+  for (const file of fs.readdirSync(fksDir)) {
+    if (!/\.ya?ml$/i.test(file)) continue;
+    if (!expectedFkFiles.has(file)) fs.rmSync(path.join(fksDir, file), { force: true });
   }
 
   const masterDoc = {
-    databaseChangeLog: sorted.map((t) => ({
-      include: {
-        file: `tables/${t.tableName}.yaml`,
-        relativeToChangelogFile: true
+    databaseChangeLog: sorted.flatMap((t) => {
+      const entries = [
+        {
+          include: {
+            file: `tables/${t.tableName}.yaml`,
+            relativeToChangelogFile: true
+          }
+        }
+      ];
+      if ((t.foreignKeys || []).length) {
+        entries.push({
+          include: {
+            file: `fks/${t.tableName}.yaml`,
+            relativeToChangelogFile: true
+          }
+        });
       }
-    }))
+      return entries;
+    })
   };
   writeYaml(path.join(outDir, "generated-master.yaml"), masterDoc);
   logInfo("Write master file: generated-master.yaml");
